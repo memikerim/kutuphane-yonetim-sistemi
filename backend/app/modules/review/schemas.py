@@ -1,0 +1,47 @@
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ReviewCreate(BaseModel):
+    book_id: uuid.UUID = Field(..., description="Değerlendirilen kitabın benzersiz kimliği (UUID)")
+    rating: int = Field(..., ge=1, le=5, description="Kitaba verilen puan (1 ile 5 arasında)")
+    comment: str | None = Field(
+        None,
+        max_length=2000,
+        description="Kullanıcının kitap hakkındaki yorumu (opsiyonel)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "book_id": "a3bb189e-8bf9-3888-9912-ace4e6543002",
+                "rating": 5,
+                "comment": "Akıcı ve ufuk açıcı bir eser. Kesinlikle tavsiye ederim.",
+            }
+        }
+    )
+
+
+class ReviewRead(BaseModel):
+    id: uuid.UUID = Field(..., description="Yorumun benzersiz kimliği")
+    user_id: uuid.UUID = Field(..., description="Yorumu yapan kullanıcının kimliği")
+    book_id: uuid.UUID = Field(..., description="Kitabın benzersiz kimliği")
+    rating: int = Field(..., ge=1, le=5, description="Verilen puan (1-5)")
+    comment: str | None = Field(None, description="Yorum metni")
+    created_at: datetime = Field(..., description="Yorumun oluşturulma tarihi")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": "c1f7b020-f561-4547-8a39-652a083f2a33",
+                "user_id": "7d4b2df2-7db5-4b2e-a3da-3f5f65a1e5a8",
+                "book_id": "a3bb189e-8bf9-3888-9912-ace4e6543002",
+                "rating": 5,
+                "comment": "Akıcı ve ufuk açıcı bir eser. Kesinlikle tavsiye ederim.",
+                "created_at": "2026-10-11T13:30:00Z",
+            }
+        },
+    )
