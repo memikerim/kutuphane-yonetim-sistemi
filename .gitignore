@@ -8,5 +8,6 @@ venv/
 .ruff_cache/
 .idea/
 .vscode/
+node_modules/
+dist/
 *.zip
-

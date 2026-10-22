@@ -25,6 +25,14 @@ def handle_service_error(func, *args, **kwargs):
 
 
 # --- Borrowing Endpoints ---
+@router.get("/borrowings", response_model=list[BorrowingRead], summary="Ödünç aldığım kitapları listele")
+def get_my_borrowings(db: DbSession, current_user: CurrentUser):
+    """
+    Giriş yapan kullanıcının ödünç aldığı tüm kitapları (aktif ve iade edilmiş) ödünç tarihine göre sıralı döner.
+    """
+    return service.get_user_borrowings(db, current_user)
+
+
 @router.post("/borrowings", response_model=BorrowingRead, status_code=status.HTTP_201_CREATED, summary="Kitap ödünç al")
 def borrow_book(data: BorrowingCreate, db: DbSession, current_user: CurrentUser):
     """

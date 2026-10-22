@@ -189,6 +189,16 @@ def create_reservation(db: Session, user: User, data: ReservationCreate) -> Rese
     return reservation
 
 
+def get_user_borrowings(db: Session, user: User) -> Sequence[Borrowing]:
+    """Kullanıcının ödünç aldığı kitapları (aktif ve geçmiş) tarihe göre sıralı döner."""
+    stmt = (
+        select(Borrowing)
+        .where(Borrowing.user_id == user.id)
+        .order_by(Borrowing.borrow_date.desc())
+    )
+    return db.scalars(stmt).all()
+
+
 def get_user_reservations(db: Session, user: User) -> Sequence[Reservation]:
     """Kullanıcının rezervasyonlarını tarihe göre sıralı döner."""
     stmt = (
@@ -197,3 +207,4 @@ def get_user_reservations(db: Session, user: User) -> Sequence[Reservation]:
         .order_by(Reservation.reservation_date.desc())
     )
     return db.scalars(stmt).all()
+

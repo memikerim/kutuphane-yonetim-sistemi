@@ -60,6 +60,20 @@ def test_create_reservation_duplicate_rejected(client, auth_headers, test_book):
     assert "bekleyen" in resp2.json()["detail"].lower()
 
 
+def test_get_my_borrowings_endpoint(client, auth_headers, test_book):
+    payload = {
+        "book_id": str(test_book.id),
+        "due_date": str(date.today() + timedelta(days=14)),
+    }
+    client.post("/api/v1/borrowings", json=payload, headers=auth_headers)
+
+    response = client.get("/api/v1/borrowings", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) >= 1
+    assert body[0]["book_id"] == str(test_book.id)
+
+
 def test_get_my_reservations_endpoint(client, auth_headers, test_book):
     payload = {"book_id": str(test_book.id)}
     client.post("/api/v1/reservations", json=payload, headers=auth_headers)
@@ -69,3 +83,4 @@ def test_get_my_reservations_endpoint(client, auth_headers, test_book):
     body = response.json()
     assert len(body) >= 1
     assert body[0]["book_id"] == str(test_book.id)
+

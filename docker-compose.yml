@@ -36,6 +36,20 @@ services:
     volumes:
       - ./backend:/app   # Geliştirme sırasında hot-reload için
 
+  frontend:
+    build:
+      context: ./frontend
+    container_name: library_frontend
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=http://localhost:${BACKEND_PORT:-8000}/api/v1
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
 volumes:
   postgres_data:
-

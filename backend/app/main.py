@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 import app.models  # noqa: F401  - tüm modelleri/ilişkileri mapper'a kaydeder
 from app.core.config import settings
@@ -67,6 +68,14 @@ Korumalı endpoint'lere erişmek için **Authorize** butonunu kullanarak `/api/v
     license_info={
         "name": "MIT License",
     },
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 API_PREFIX = "/api/v1"
