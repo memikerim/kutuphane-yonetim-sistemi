@@ -214,3 +214,98 @@ def test_get_user_reservations_ordered(db_session, test_user, test_book):
     reservations = service.get_user_reservations(db_session, test_user)
     assert len(reservations) >= 1
     assert reservations[0].book_id == test_book.id
+
+
+def test_borrowing_reserved_book_deletes_reservation(db_session, test_user, test_book):
+    """Rezerve edilen kitap ödünç alındığında rezerve listesinden silinmelidir."""
+    test_book.stock_count = 1
+    db_session.commit()
+
+    res = service.create_reservation(db_session, test_user, ReservationCreate(book_id=test_book.id))
+    assert res.expires_at is not None
+    assert len(service.get_user_reservations(db_session, test_user)) == 1
+
+    service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(book_id=test_book.id, due_date=date.today() + timedelta(days=14)),
+    )
+
+    # Ödünç alındıktan sonra rezervasyon listesinden silinmiş olmalı
+    assert len(service.get_user_reservations(db_session, test_user)) == 0
+
+
+def test_reserved_stock_blocks_other_users_from_borrowing(db_session, test_user, test_book):
+    """Stok 1 iken 1 kullanıcı rezerve etmişse başka kullanıcı ödünç alamaz, sadece rezerve edebilir."""
+    test_book.stock_count = 1
+    db_session.commit()
+
+    user2 = User(email="user2@example.com", password_hash="h", first_name="U2", last_name="Test")
+    user3 = User(email="user3@example.com", password_hash="h", first_name="U3", last_name="Test")
+    db_session.add_all([user2, user3])
+    db_session.commit()
+
+    # User 1 rezerve eder (1. sıra, stok=1 olduğu için hak onda)
+    res1 = service.create_reservation(db_session, test_user, ReservationCreate(book_id=test_book.id))
+    assert res1.queue_position == 1
+    assert res1.can_borrow_now is True
+
+    # User 2 doğrudan ödünç almaya çalışırsa reddedilir
+    with pytest.raises(service.BusinessRuleError) as exc_info:
+        service.create_borrowing(
+            db_session,
+            user2,
+            BorrowingCreate(book_id=test_book.id, due_date=date.today() + timedelta(days=14)),
+        )
+    assert "rezerve" in str(exc_info.value).lower()
+
+    # Ancak User 2 ve User 3 rezerve ederek sıraya girebilir
+    res2 = service.create_reservation(db_session, user2, ReservationCreate(book_id=test_book.id))
+    res3 = service.create_reservation(db_session, user3, ReservationCreate(book_id=test_book.id))
+    assert res2.queue_position == 2
+    assert res3.queue_position == 3
+    assert "3. sıradasınız" in res3.queue_message
+
+
+def test_reservation_24h_timer_starts_on_stock_and_expires_to_next_user(db_session, test_user, test_book):
+    """Stok 0 iken süre başlamaz; stok açılınca 24 saat süre başlar, süre dolunca silinip sıradakine geçer."""
+    from datetime import datetime, timezone
+
+    test_book.stock_count = 0
+    db_session.commit()
+
+    user2 = User(email="queue2@example.com", password_hash="h", first_name="Q2", last_name="Test")
+    db_session.add(user2)
+    db_session.commit()
+
+    res1 = service.create_reservation(db_session, test_user, ReservationCreate(book_id=test_book.id))
+    res2 = service.create_reservation(db_session, user2, ReservationCreate(book_id=test_book.id))
+
+    # Stok 0 olduğu için henüz kimsenin 24 saatlik süresi başlamadı
+    assert res1.expires_at is None
+    assert res2.expires_at is None
+
+    # Stok 1'e çıkarıldığında 1. sıradaki kullanıcının 24 saatlik süresi başlar
+    test_book.stock_count = 1
+    db_session.commit()
+    service.sync_reservations(db_session, test_book.id)
+    db_session.refresh(res1)
+    db_session.refresh(res2)
+
+    assert res1.expires_at is not None
+    assert res1.can_borrow_now is True
+    assert res2.expires_at is None
+
+    # 1. kullanıcının 24 saatlik süresi dolduğunda rezerveden silinir ve sıra 2. kullanıcıya geçer
+    res1.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db_session.commit()
+
+    user1_list = service.get_user_reservations(db_session, test_user)
+    user2_list = service.get_user_reservations(db_session, user2)
+
+    assert len(user1_list) == 0
+    assert len(user2_list) == 1
+    assert user2_list[0].queue_position == 1
+    assert user2_list[0].can_borrow_now is True
+    assert user2_list[0].expires_at is not None
+

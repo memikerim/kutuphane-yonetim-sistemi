@@ -450,6 +450,14 @@ export default function App() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                 {booksData.items.map((book) => {
                   const inStock = book.stock_count > 0;
+                  const reservedCount = book.reserved_count || 0;
+                  const queueIds = book.reservation_queue_user_ids || [];
+                  const userQueueIdx = user ? queueIds.indexOf(user.id) : -1;
+                  const userHasActiveSlot =
+                    inStock && userQueueIdx >= 0 && userQueueIdx < book.stock_count;
+                  const allStockReservedByOthers =
+                    inStock && reservedCount >= book.stock_count && !userHasActiveSlot;
+
                   return (
                     <div
                       key={book.id}
@@ -458,21 +466,37 @@ export default function App() {
                     >
                       <div>
                         {/* Card Top Strip */}
-                        <div className="p-5 pb-3 flex items-center justify-between gap-2">
-                          <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                              inStock
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-rose-50 text-rose-700 border border-rose-200'
-                            }`}
-                          >
+                        <div className="p-5 pb-3 flex flex-wrap items-center justify-between gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                inStock ? 'bg-emerald-500' : 'bg-rose-500'
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                inStock
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200'
                               }`}
-                            />
-                            {inStock ? `Stokta: ${book.stock_count}` : 'Tükendi (0)'}
-                          </span>
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  inStock ? 'bg-emerald-500' : 'bg-rose-500'
+                                }`}
+                              />
+                              {inStock ? `Stokta: ${book.stock_count}` : 'Tükendi (0)'}
+                            </span>
+
+                            {userHasActiveSlot ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                                Size Rezerveli
+                              </span>
+                            ) : allStockReservedByOthers ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                Başkasına Rezerveli ({reservedCount})
+                              </span>
+                            ) : reservedCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                Sırada: {reservedCount} Kişi
+                              </span>
+                            ) : null}
+                          </div>
 
                           {book.published_year && (
                             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400">
@@ -531,12 +555,20 @@ export default function App() {
                         </span>
                         <span
                           className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-xl transition-colors ${
-                            inStock
-                              ? 'bg-indigo-50 text-indigo-700 group-hover:bg-indigo-600 group-hover:text-white'
-                              : 'bg-amber-50 text-amber-800 group-hover:bg-amber-600 group-hover:text-white'
+                            userHasActiveSlot
+                              ? 'bg-emerald-100 text-emerald-800 group-hover:bg-emerald-600 group-hover:text-white'
+                              : allStockReservedByOthers || !inStock
+                              ? 'bg-amber-50 text-amber-800 group-hover:bg-amber-600 group-hover:text-white'
+                              : 'bg-indigo-50 text-indigo-700 group-hover:bg-indigo-600 group-hover:text-white'
                           }`}
                         >
-                          {inStock ? 'İncele & Ödünç Al' : 'İncele & Rezerve Et'}
+                          {userHasActiveSlot
+                            ? 'Ödünç Al (Sıra Sizde)'
+                            : allStockReservedByOthers
+                            ? 'Rezerveli • Sıraya Gir'
+                            : inStock
+                            ? 'İncele & Ödünç Al'
+                            : 'İncele & Rezerve Et'}
                         </span>
                       </div>
                     </div>

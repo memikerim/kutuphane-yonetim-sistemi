@@ -155,6 +155,9 @@ def get_books(
     sort_by: str = "title",
     sort_order: str = "asc",
 ) -> dict[str, Any]:
+    from app.modules.borrowing.service import sync_reservations
+
+    sync_reservations(db)
     stmt = select(Book)
 
     # 1. Arama (Search): Başlıkta (title) büyük/küçük harf duyarsız arama
@@ -214,6 +217,9 @@ def get_books(
 
 
 def get_book(db: Session, book_id: uuid.UUID) -> Book:
+    from app.modules.borrowing.service import sync_reservations
+
+    sync_reservations(db, book_id)
     db_obj = db.get(Book, book_id)
     if not db_obj:
         raise NotFoundError("Kitap bulunamadı")
@@ -247,6 +253,8 @@ def create_book(db: Session, data: BookCreate) -> Book:
 
 
 def update_book(db: Session, book_id: uuid.UUID, data: BookUpdate) -> Book:
+    from app.modules.borrowing.service import sync_reservations
+
     db_obj = get_book(db, book_id)
 
     update_data = data.model_dump(exclude_unset=True, exclude={"author_ids", "category_ids"})
@@ -264,6 +272,8 @@ def update_book(db: Session, book_id: uuid.UUID, data: BookUpdate) -> Book:
         db.rollback()
         raise DuplicateError("Bu ISBN zaten mevcut")
 
+    # Kitap stoğu güncellendiyse (ör. 0'dan 1'e çıktıysa) sırada bekleyen rezervasyonun 24 saatlik süresini başlat
+    sync_reservations(db, book_id)
     db.refresh(db_obj)
     return db_obj
 

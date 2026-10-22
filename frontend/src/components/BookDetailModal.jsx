@@ -99,10 +99,14 @@ export default function BookDetailModal({
 
     setActionLoading(true);
     try {
-      await api.createReservation({
+      const res = await api.createReservation({
         book_id: book.id,
       });
-      notify(`"${book.title}" için rezervasyon sırasına girdiniz (PENDING).`, 'success');
+      notify(
+        res?.queue_message || `"${book.title}" için rezervasyon sırasına girdiniz.`,
+        'success'
+      );
+      await loadBookAndReviews();
       if (onBookUpdated) onBookUpdated();
     } catch (err) {
       notify(err.message || 'Rezervasyon oluşturulamadı', 'error');
@@ -143,6 +147,15 @@ export default function BookDetailModal({
     reviews.length > 0
       ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
       : null;
+
+  const reservedCount = book.reserved_count || 0;
+  const queueIds = book.reservation_queue_user_ids || [];
+  const userQueueIdx = user ? queueIds.indexOf(user.id) : -1;
+  const userQueuePos = userQueueIdx >= 0 ? userQueueIdx + 1 : null;
+  const userHasActiveSlot =
+    book.stock_count > 0 && userQueuePos !== null && userQueuePos <= book.stock_count;
+  const allStockReservedByOthers =
+    book.stock_count > 0 && reservedCount >= book.stock_count && !userHasActiveSlot;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
@@ -191,19 +204,38 @@ export default function BookDetailModal({
             {/* Right Metadata Details */}
             <div className="md:col-span-2 flex flex-col justify-between space-y-4">
               <div className="space-y-3">
-                {/* Stock Badge */}
+                {/* Stock & Reservation Badges */}
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  {book.stock_count > 0 ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Stokta Mevcut ({book.stock_count} Adet)
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      Stok Tükendi (0 Adet)
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {book.stock_count > 0 ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Stokta Mevcut ({book.stock_count} Adet)
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        Stok Tükendi (0 Adet)
+                      </span>
+                    )}
+
+                    {userHasActiveSlot ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                        <Clock className="w-3.5 h-3.5" />
+                        Sizin İçin Rezerveli (24 Saat)
+                      </span>
+                    ) : allStockReservedByOthers ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        <Clock className="w-3.5 h-3.5" />
+                        Başkasına Rezerveli ({reservedCount} Kişi Sırada)
+                      </span>
+                    ) : reservedCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                        <Clock className="w-3.5 h-3.5" />
+                        Rezerve Sırası: {reservedCount} Kişi
+                      </span>
+                    ) : null}
+                  </div>
 
                   <span className="inline-flex items-center gap-1 text-xs font-mono text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
                     <Hash className="w-3.5 h-3.5 text-slate-400" />
@@ -257,7 +289,78 @@ export default function BookDetailModal({
 
               {/* Borrowing & Reservation Action Box */}
               <div className="pt-3 border-t border-slate-200/80">
-                {book.stock_count > 0 ? (
+                {userHasActiveSlot ? (
+                  <div className="space-y-3">
+                    <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-xs text-emerald-900">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        Rezerve sırası sizde ({userQueuePos}. sıradasınız)!
+                      </p>
+                      <p className="text-emerald-700 mt-0.5">
+                        Kitap stoğu 24 saatliğine sizin için ayrıldı. Süreniz dolmadan hemen ödünç alabilirsiniz; ödünç aldığınızda rezerve listesinden otomatik silinir.
+                      </p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Planlanan İade Tarihi (due_date)
+                        </label>
+                        <div className="relative">
+                          <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="date"
+                            min={todayStr}
+                            value={dueDate}
+                            onChange={(e) => setDueDate(e.target.value)}
+                            className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleBorrow}
+                        disabled={actionLoading}
+                        className="py-2.5 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold text-sm shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                        {actionLoading ? 'İşleniyor...' : 'Rezerve Kitabı Ödünç Al'}
+                      </button>
+                    </div>
+                  </div>
+                ) : userQueuePos !== null ? (
+                  <div className="bg-amber-50/90 border border-amber-200 p-3.5 rounded-xl text-xs text-amber-900 space-y-1">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                      Rezerve listesinde {userQueuePos}. sıradasınız
+                      {userQueuePos > 1 ? ` (Önünüzde ${userQueuePos - 1} kişi var)` : ''}
+                    </p>
+                    <p className="text-amber-800 leading-relaxed">
+                      {userQueuePos > 1
+                        ? `Rezerve listesinde ${userQueuePos}. sıradasınız. Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz.`
+                        : 'Kitap stoğu çıktığı anda 24 saatlik ödünç alma süreniz başlayacaktır.'}
+                    </p>
+                  </div>
+                ) : allStockReservedByOthers ? (
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-amber-50/80 border border-amber-200 p-3.5 rounded-xl">
+                    <div className="text-xs text-amber-900">
+                      <p className="font-bold">
+                        Stokta {book.stock_count} adet var ancak şu an başkasına rezerve edilmiş durumda!
+                      </p>
+                      <p className="text-amber-700 mt-0.5">
+                        Rezerve eden kullanıcıların 24 saatlik süresi bitene kadar başka kullanıcı ödünç alamaz, sadece rezerve ederek sıraya girebilirsiniz (Sırada: {reservedCount} kişi).
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleReserve}
+                      disabled={actionLoading}
+                      className="w-full sm:w-auto shrink-0 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Clock className="w-4 h-4" />
+                      {actionLoading
+                        ? 'İşleniyor...'
+                        : `Rezerve Et (${reservedCount + 1}. Sıraya Gir)`}
+                    </button>
+                  </div>
+                ) : book.stock_count > 0 ? (
                   <div className="space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-end gap-3">
                       <div className="flex-1">
@@ -286,7 +389,7 @@ export default function BookDetailModal({
                       <button
                         onClick={handleReserve}
                         disabled={actionLoading}
-                        title="Bu kitap için rezervasyon oluştur"
+                        title="Bu kitap için rezervasyon oluştur (24 saat geçerli)"
                         className="py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                       >
                         <BookmarkPlus className="w-4 h-4 text-indigo-600" />
@@ -299,7 +402,9 @@ export default function BookDetailModal({
                     <div className="text-xs text-amber-900">
                       <p className="font-bold">Bu kitap şu an stokta bulunmuyor (Stok = 0).</p>
                       <p className="text-amber-700 mt-0.5">
-                        İade edildiğinde sıradaki ilk okuyucu olmak için rezervasyon yapabilirsiniz.
+                        {reservedCount > 0
+                          ? `Şu an sırada ${reservedCount} kişi bekliyor. Rezerve ederseniz ${reservedCount + 1}. sıraya yerleşirsiniz; stok çıktığında ve sıra size geldiğinde 24 saatlik süreniz başlar.`
+                          : 'Kitap stoğu çıktığı anda 24 saatlik ödünç alma hakkı kazanmak için rezervasyon yapabilirsiniz.'}
                       </p>
                     </div>
                     <button
@@ -308,7 +413,11 @@ export default function BookDetailModal({
                       className="w-full sm:w-auto shrink-0 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
                       <Clock className="w-4 h-4" />
-                      {actionLoading ? 'İşleniyor...' : 'Rezerve Et (Sıraya Gir)'}
+                      {actionLoading
+                        ? 'İşleniyor...'
+                        : reservedCount > 0
+                        ? `Rezerve Et (${reservedCount + 1}. Sıraya Gir)`
+                        : 'Rezerve Et (1. Sıraya Gir)'}
                     </button>
                   </div>
                 )}

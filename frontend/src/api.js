@@ -127,6 +127,9 @@ export const api = {
   getMyReservations: () => request('/reservations'),
   createReservation: (data) =>
     request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
+  cancelReservation: (id) =>
+    request(`/reservations/${id}`, { method: 'DELETE' }),
+
 
   // Reviews
   getReviews: (bookId) =>

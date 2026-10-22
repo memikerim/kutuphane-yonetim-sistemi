@@ -34,6 +34,13 @@ class ReservationRead(BaseModel):
     user_id: uuid.UUID
     book_id: uuid.UUID
     reservation_date: datetime
+    expires_at: datetime | None = None
+    remaining_seconds: int | None = None
+    queue_position: int = 1
+    people_ahead: int = 0
+    can_borrow_now: bool = False
+    queue_message: str = ""
     status: ReservationStatus
 
     model_config = ConfigDict(from_attributes=True)
+

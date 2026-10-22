@@ -108,6 +108,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.Uuid(), nullable=False),
     sa.Column('book_id', sa.Uuid(), nullable=False),
     sa.Column('reservation_date', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('status', sa.Enum('PENDING', 'FULFILLED', 'CANCELLED', 'EXPIRED', name='reservation_status', native_enum=False, length=20), server_default='PENDING', nullable=False),
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.ForeignKeyConstraint(['book_id'], ['books.id'], name=op.f('fk_reservations_book_id_books'), ondelete='CASCADE'),

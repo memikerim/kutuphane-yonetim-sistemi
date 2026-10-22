@@ -1,6 +1,6 @@
 import enum
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, Date, DateTime, Enum, ForeignKey, Index, func, text
@@ -11,6 +11,12 @@ from app.core.base_model import Base, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from app.modules.auth.models import User
     from app.modules.catalog.models import Book
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class BorrowingStatus(str, enum.Enum):
@@ -79,7 +85,13 @@ class Reservation(UUIDPrimaryKeyMixin, Base):
         ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
     )
     reservation_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
     status: Mapped[ReservationStatus] = mapped_column(
         Enum(ReservationStatus, name="reservation_status", native_enum=False, length=20),
@@ -89,5 +101,59 @@ class Reservation(UUIDPrimaryKeyMixin, Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="reservations")
-    book: Mapped["Book"] = relationship(back_populates="reservations")
+    book: Mapped["Book"] = relationship(back_populates="reservations", lazy="selectin")
+
+    @property
+    def remaining_seconds(self) -> int | None:
+        if self.expires_at is None:
+            return None
+        diff = (_ensure_utc(self.expires_at) - datetime.now(timezone.utc)).total_seconds()
+        return max(0, int(diff))
+
+    @property
+    def queue_position(self) -> int:
+        if not self.book or not self.book.reservations:
+            return 1
+        pending = [
+            r for r in self.book.reservations if r.status == ReservationStatus.PENDING
+        ]
+        pending.sort(
+            key=lambda r: (
+                _ensure_utc(r.reservation_date).timestamp() if r.reservation_date else 0.0,
+                str(r.id),
+            )
+        )
+        for idx, r in enumerate(pending):
+            if r.id == self.id:
+                return idx + 1
+        return 1
+
+    @property
+    def people_ahead(self) -> int:
+        return max(0, self.queue_position - 1)
+
+    @property
+    def can_borrow_now(self) -> bool:
+        if not self.book or self.book.stock_count <= 0:
+            return False
+        return self.queue_position <= self.book.stock_count
+
+    @property
+    def queue_message(self) -> str:
+        pos = self.queue_position
+        if self.can_borrow_now:
+            return (
+                f"Rezerve listesinde {pos}. sıradasınız (Sıra sizde!). "
+                "Kitap stoğu sizin için ayrıldı, 24 saatlik süreniz dolmadan ödünç alabilirsiniz."
+            )
+        if pos > 1:
+            return (
+                f"Rezerve listesinde {pos}. sıradasınız. "
+                "Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz."
+            )
+        return (
+            "Rezerve listesinde 1. sıradasınız. "
+            "Kitap stoğu çıktığı anda 24 saatlik ödünç alma süreniz başlayacaktır."
+        )
+
 

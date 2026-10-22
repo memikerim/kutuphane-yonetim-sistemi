@@ -64,6 +64,16 @@ def create_reservation(data: ReservationCreate, db: DbSession, current_user: Cur
 @router.get("/reservations", response_model=list[ReservationRead], summary="Rezervasyonlarımı listele")
 def get_my_reservations(db: DbSession, current_user: CurrentUser):
     """
-    Giriş yapan kullanıcının tüm rezervasyonlarını rezervasyon tarihine göre (en yeni en üstte) sıralı döner.
+    Giriş yapan kullanıcının aktif rezervasyonlarını sıra ve 24 saatlik kalan süre bilgisiyle döner.
     """
     return service.get_user_reservations(db, current_user)
+
+
+@router.delete("/reservations/{id}", status_code=status.HTTP_204_NO_CONTENT, summary="Rezervasyonu iptal et / sil")
+def cancel_reservation(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
+    """
+    Giriş yapan kullanıcının bekleyen rezervasyonunu iptal ederek rezerve listesinden siler.
+    """
+    handle_service_error(service.cancel_reservation, db, current_user, id)
+    return None
+

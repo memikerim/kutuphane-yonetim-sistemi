@@ -77,6 +77,8 @@ class BookRead(BookBase):
     publisher: PublisherRead | None = None
     authors: list[AuthorRead] = []
     categories: list[CategoryRead] = []
+    reserved_count: int = 0
+    reservation_queue_user_ids: list[uuid.UUID] = []
     model_config = ConfigDict(from_attributes=True)
 
 # --- Pagination ---

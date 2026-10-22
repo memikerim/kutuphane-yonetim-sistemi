@@ -8,8 +8,23 @@ import {
   BookmarkCheck,
   RefreshCw,
   AlertCircle,
+  Trash2,
+  Users,
 } from 'lucide-react';
 import { api } from '../api';
+
+function formatRemainingCountdown(expiresAt, nowMs) {
+  if (!expiresAt) return null;
+  const targetMs = new Date(expiresAt).getTime();
+  const diffSec = Math.max(0, Math.floor((targetMs - nowMs) / 1000));
+  const hours = Math.floor(diffSec / 3600);
+  const minutes = Math.floor((diffSec % 3600) / 60);
+  const seconds = diffSec % 60;
+  return {
+    diffSec,
+    text: `${hours} saat ${String(minutes).padStart(2, '0')} dk ${String(seconds).padStart(2, '0')} sn`,
+  };
+}
 
 export default function MyLibraryView({ notify, onSelectBook }) {
   const [borrowings, setBorrowings] = useState([]);
@@ -17,7 +32,10 @@ export default function MyLibraryView({ notify, onSelectBook }) {
   const [bookMap, setBookMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [returningId, setReturningId] = useState(null);
+  const [borrowingResId, setBorrowingResId] = useState(null);
+  const [cancellingResId, setCancellingResId] = useState(null);
   const [subTab, setSubTab] = useState('borrowings');
+  const [nowMs, setNowMs] = useState(Date.now());
 
   const fetchAll = async () => {
     setLoading(true);
@@ -66,6 +84,22 @@ export default function MyLibraryView({ notify, onSelectBook }) {
     fetchAll();
   }, []);
 
+  // Live 1-second ticker for 24-hour reservation countdown
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const current = Date.now();
+      setNowMs(current);
+      // If any active reservation countdown hits 0, refresh from backend so expired reservation is removed
+      const anyJustExpired = reservations.some(
+        (r) => r.expires_at && new Date(r.expires_at).getTime() <= current
+      );
+      if (anyJustExpired) {
+        fetchAll();
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [reservations]);
+
   const handleReturnBook = async (borrowingId) => {
     setReturningId(borrowingId);
     try {
@@ -76,6 +110,43 @@ export default function MyLibraryView({ notify, onSelectBook }) {
       notify(err.message || 'İade işlemi başarısız', 'error');
     } finally {
       setReturningId(null);
+    }
+  };
+
+  const handleBorrowReservedBook = async (res) => {
+    setBorrowingResId(res.id);
+    try {
+      const d = new Date();
+      d.setDate(d.getDate() + 14);
+      const dueDateStr = d.toISOString().split('T')[0];
+
+      await api.borrowBook({
+        book_id: res.book_id,
+        due_date: dueDateStr,
+      });
+      const bookTitle = bookMap[res.book_id]?.title || 'Kitap';
+      notify(
+        `"${bookTitle}" başarıyla ödünç alındı ve rezerve listesinden kaldırıldı!`,
+        'success'
+      );
+      await fetchAll();
+    } catch (err) {
+      notify(err.message || 'Ödünç alma işlemi başarısız', 'error');
+    } finally {
+      setBorrowingResId(null);
+    }
+  };
+
+  const handleCancelReservation = async (resId) => {
+    setCancellingResId(resId);
+    try {
+      await api.cancelReservation(resId);
+      notify('Rezervasyonunuz iptal edildi ve listeden kaldırıldı.', 'info');
+      await fetchAll();
+    } catch (err) {
+      notify(err.message || 'Rezervasyon iptal edilemedi', 'error');
+    } finally {
+      setCancellingResId(null);
     }
   };
 
@@ -92,7 +163,7 @@ export default function MyLibraryView({ notify, onSelectBook }) {
             Kitaplarım & Rezervasyonlarım
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Ödünç aldığınız kitapları görüntüleyip tek tıkla iade edebilir ve rezervasyon sıranızı takip edebilirsiniz.
+            Ödünç aldığınız kitapları görüntüleyip tek tıkla iade edebilir, rezervasyon sıranızı ve 24 saatlik kalan sürenizi takip edebilirsiniz.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
@@ -275,9 +346,9 @@ export default function MyLibraryView({ notify, onSelectBook }) {
       ) : reservations.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center border border-dashed border-slate-300">
           <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-          <h3 className="text-base font-bold text-slate-800">Aktif veya geçmiş rezervasyonunuz yok</h3>
+          <h3 className="text-base font-bold text-slate-800">Aktif rezervasyonunuz bulunmuyor</h3>
           <p className="text-xs text-slate-500 mt-1">
-            Stokta olmayan veya sıraya girmek istediğiniz kitapları detay ekranından rezerve edebilirsiniz.
+            Stokta olmayan veya başkasına rezerve edilmiş kitapları detay ekranından rezerve ederek sıraya girebilirsiniz.
           </p>
         </div>
       ) : (
@@ -286,45 +357,100 @@ export default function MyLibraryView({ notify, onSelectBook }) {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="py-3.5 px-4">Kitap</th>
-                  <th className="py-3.5 px-4">ISBN</th>
+                  <th className="py-3.5 px-4">Kitap & ISBN</th>
                   <th className="py-3.5 px-4">Rezervasyon Tarihi</th>
-                  <th className="py-3.5 px-4">Durum</th>
+                  <th className="py-3.5 px-4">Rezerve Sırası & Bilgi</th>
+                  <th className="py-3.5 px-4">Kalan Süre (24 Saat Zaman Aşımı)</th>
+                  <th className="py-3.5 px-4 text-right">İşlem</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {reservations.map((res) => {
                   const book = bookMap[res.book_id];
+                  const countdown = formatRemainingCountdown(res.expires_at, nowMs);
+                  const queuePos = res.queue_position || 1;
+                  const canBorrow = Boolean(res.can_borrow_now);
+
                   return (
                     <tr key={res.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4 font-semibold text-slate-900">
+                      <td className="py-4 px-4">
                         <button
                           onClick={() => book && onSelectBook(book)}
-                          className="hover:text-indigo-600 text-left cursor-pointer"
+                          className="font-bold text-slate-900 hover:text-indigo-600 text-left cursor-pointer block"
                         >
                           {book ? book.title : `Kitap #${res.book_id.slice(0, 8)}`}
                         </button>
+                        <span className="text-xs font-mono text-slate-400">
+                          ISBN: {book ? book.isbn : '-'}
+                        </span>
                       </td>
-                      <td className="py-3.5 px-4 text-xs font-mono text-slate-500">
-                        {book ? book.isbn : '-'}
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-600">
+
+                      <td className="py-4 px-4 text-xs text-slate-600 whitespace-nowrap">
                         {new Date(res.reservation_date).toLocaleString('tr-TR')}
                       </td>
-                      <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                            res.status === 'PENDING'
-                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                              : res.status === 'FULFILLED'
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {res.status === 'PENDING'
-                            ? 'PENDING (Sırada Bekliyor)'
-                            : res.status}
-                        </span>
+
+                      <td className="py-4 px-4 max-w-md">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                              canBorrow
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : 'bg-amber-100 text-amber-800 border border-amber-300'
+                            }`}
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            {queuePos}. Sıra {canBorrow ? '(Sıra Sizde!)' : `(Önünüzde ${res.people_ahead || 0} kişi var)`}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          {res.queue_message ||
+                            (queuePos > 1
+                              ? `Rezerve listesinde ${queuePos}. sıradasınız. Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz.`
+                              : 'Kitap stoğu çıktığı anda 24 saatlik süreniz başlayacaktır.')}
+                        </p>
+                      </td>
+
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        {countdown ? (
+                          <div className="inline-flex flex-col gap-1 px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1">
+                              <Clock className="w-3 h-3 animate-pulse" />
+                              Aktif Süre (24 Saat)
+                            </span>
+                            <span className="text-xs font-mono font-bold">
+                              {countdown.text} kaldı
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-medium">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            Stok / Sıra Bekleniyor (24s henüz başlamadı)
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="py-4 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-2">
+                          {canBorrow && (
+                            <button
+                              onClick={() => handleBorrowReservedBook(res)}
+                              disabled={borrowingResId === res.id}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                            >
+                              <BookOpen className="w-3.5 h-3.5" />
+                              {borrowingResId === res.id ? 'Alınıyor...' : 'Hemen Ödünç Al'}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleCancelReservation(res.id)}
+                            disabled={cancellingResId === res.id}
+                            title="Rezervasyonu İptal Et ve Listeden Sil"
+                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            {cancellingResId === res.id ? 'Siliniyor...' : 'İptal Et'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -337,4 +463,5 @@ export default function MyLibraryView({ notify, onSelectBook }) {
     </div>
   );
 }
+
 

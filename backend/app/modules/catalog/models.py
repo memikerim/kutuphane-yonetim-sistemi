@@ -89,9 +89,35 @@ class Book(UUIDPrimaryKeyMixin, Base):
         secondary=book_categories, back_populates="books", lazy="selectin"
     )
     borrowings: Mapped[list["Borrowing"]] = relationship(back_populates="book")
-    reservations: Mapped[list["Reservation"]] = relationship(back_populates="book")
+    reservations: Mapped[list["Reservation"]] = relationship(
+        back_populates="book", lazy="selectin"
+    )
     reviews: Mapped[list["Review"]] = relationship(back_populates="book")
+
+    @property
+    def _sorted_pending_reservations(self) -> list["Reservation"]:
+        from app.modules.borrowing.models import _ensure_utc
+
+        if not self.reservations:
+            return []
+        pending = [r for r in self.reservations if r.status.value == "PENDING"]
+        pending.sort(
+            key=lambda r: (
+                _ensure_utc(r.reservation_date).timestamp() if r.reservation_date else 0.0,
+                str(r.id),
+            )
+        )
+        return pending
+
+    @property
+    def reserved_count(self) -> int:
+        return len(self._sorted_pending_reservations)
+
+    @property
+    def reservation_queue_user_ids(self) -> list[uuid.UUID]:
+        return [r.user_id for r in self._sorted_pending_reservations]
 
     def __repr__(self) -> str:
         return f"<Book {self.isbn} - {self.title}>"
+
 
