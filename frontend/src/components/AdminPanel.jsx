@@ -635,6 +635,12 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     (c) => c.name.toLowerCase() === categoryQuery.trim().toLowerCase()
   );
 
+  const filteredPenalties = (unpaidPenalties?.items || []).filter((item) => {
+    if (penaltyStatusFilter === 'OVERDUE') return item.status === 'OVERDUE';
+    if (penaltyStatusFilter === 'RETURNED') return item.status === 'RETURNED';
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Admin Header Banner */}
