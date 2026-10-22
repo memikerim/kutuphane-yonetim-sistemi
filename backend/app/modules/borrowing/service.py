@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.modules.auth.models import User
+from app.modules.auth.models import RoleName, User
 from app.modules.borrowing.models import (
     Borrowing,
     BorrowingStatus,
@@ -519,7 +519,7 @@ def cancel_reservation(db: Session, user: User, reservation_id: uuid.UUID) -> No
 
 
 def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> Borrowing:
-    """Kullanıcının ilgili ödünç işlemine ait gecikme cezasını ödediğini işaretler (is_penalty_paid = True)."""
+    """Kullanıcının ilgili ödünç işlemine ait gecikme cezasını ödediğini veya Admin tarafından tahsil edildiğini işaretler."""
     borrowing = db.get(Borrowing, borrowing_id)
     if not borrowing:
         logger.warning(
@@ -529,7 +529,10 @@ def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> B
         )
         raise NotFoundError("Ödünç alma kaydı bulunamadı")
 
-    if borrowing.user_id != user.id:
+    is_admin = any(
+        (r.name == RoleName.ADMIN or str(r.name) == "ADMIN") for r in (user.roles or [])
+    )
+    if borrowing.user_id != user.id and not is_admin:
         logger.warning(
             "Ceza ödeme başarısız: Kayıt kullanıcıya ait değil -> borrow_id: %s, requester: %s, owner: %s",
             borrowing_id,
@@ -538,8 +541,13 @@ def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> B
         )
         raise BusinessRuleError("Bu ödünç alma kaydı size ait değil")
 
+    today = date.today()
     if (borrowing.penalty_amount or 0.0) <= 0.0:
-        raise BusinessRuleError("Bu kayıt için ödenecek bir gecikme cezası bulunmamaktadır")
+        if borrowing.due_date < today:
+            overdue_days = (today - borrowing.due_date).days
+            borrowing.penalty_amount = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+        else:
+            raise BusinessRuleError("Bu kayıt için ödenecek bir gecikme cezası bulunmamaktadır")
 
     if borrowing.is_penalty_paid:
         raise BusinessRuleError("Bu gecikme cezası zaten ödenmiş")
@@ -548,10 +556,11 @@ def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> B
     db.commit()
     db.refresh(borrowing)
     logger.info(
-        "Gecikme cezası başarıyla ödendi -> borrow_id: %s, user_id: %s, penalty_amount: %.2f TL",
+        "Gecikme cezası başarıyla tahsil edildi / ödendi -> borrow_id: %s, user_id: %s, penalty_amount: %.2f TL, is_admin: %s",
         borrowing.id,
-        user.id,
+        borrowing.user_id,
         borrowing.penalty_amount,
+        is_admin,
     )
     return borrowing
 

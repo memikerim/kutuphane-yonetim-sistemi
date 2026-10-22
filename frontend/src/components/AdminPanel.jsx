@@ -18,6 +18,12 @@ import {
   CheckCircle2,
   FastForward,
   Image as ImageIcon,
+  Receipt,
+  ScrollText,
+  DollarSign,
+  Filter,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -31,6 +37,21 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const [publishers, setPublishers] = useState([]);
   const [borrowings, setBorrowings] = useState([]);
   const [simulatingId, setSimulatingId] = useState(null);
+
+  // Ödenmemiş Borçlar State'leri
+  const [unpaidPenalties, setUnpaidPenalties] = useState({
+    total_unpaid_amount: 0,
+    debtor_count: 0,
+    items: [],
+  });
+  const [collectingId, setCollectingId] = useState(null);
+  const [penaltyStatusFilter, setPenaltyStatusFilter] = useState('ALL');
+
+  // Sistem Logları State'leri
+  const [systemLogs, setSystemLogs] = useState([]);
+  const [logCategoryFilter, setLogCategoryFilter] = useState('');
+  const [logLevelFilter, setLogLevelFilter] = useState('');
+  const [logsLoading, setLogsLoading] = useState(false);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -67,23 +88,41 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const loadAllCatalogData = async () => {
     setLoading(true);
     try {
-      const [booksRes, authorsRes, categoriesRes, publishersRes, borrowingsRes] =
+      const [booksRes, authorsRes, categoriesRes, publishersRes, borrowingsRes, penaltiesRes] =
         await Promise.all([
           api.getBooks({ page: 1, limit: 100 }),
           api.getAuthors(),
           api.getCategories(),
           api.getPublishers(),
           api.getAdminBorrowings().catch(() => []),
+          api.getUnpaidPenalties().catch(() => ({ total_unpaid_amount: 0, debtor_count: 0, items: [] })),
         ]);
       setBooks(booksRes?.items || []);
       setAuthors(authorsRes || []);
       setCategories(categoriesRes || []);
       setPublishers(publishersRes || []);
       setBorrowings(borrowingsRes || []);
+      setUnpaidPenalties(penaltiesRes || { total_unpaid_amount: 0, debtor_count: 0, items: [] });
     } catch (err) {
       notify(err.message || 'Katalog verileri yüklenemedi', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSystemLogs = async (category = logCategoryFilter, level = logLevelFilter) => {
+    setLogsLoading(true);
+    try {
+      const logs = await api.getSystemLogs({
+        category: category || undefined,
+        level: level || undefined,
+        limit: 100,
+      });
+      setSystemLogs(logs || []);
+    } catch (err) {
+      notify(err.message || 'Sistem logları yüklenemedi', 'error');
+    } finally {
+      setLogsLoading(false);
     }
   };
 
@@ -103,10 +142,131 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     }
   };
 
+  // Elden Ceza Tahsilatı (Admin yetkisiyle borç kapatma)
+  const handleCollectPenalty = async (item) => {
+    const amountStr = Number(item.penalty_amount || 0).toFixed(2);
+    if (
+      !window.confirm(
+        `"${item.user_full_name}" adlı kullanıcının ${amountStr} TL tutarındaki gecikme cezası elden tahsil edildi olarak işaretlenecek ve borç kapatılacaktır.\n\nOnaylıyor musunuz?`
+      )
+    ) {
+      return;
+    }
+
+    setCollectingId(item.borrowing_id);
+    try {
+      await api.payPenalty(item.borrowing_id);
+      notify(
+        `"${item.user_full_name}" kullanıcısının ${amountStr} TL cezası başarıyla tahsil edildi ve borç kapatıldı!`,
+        'success'
+      );
+      await loadAllCatalogData();
+      if (subTab === 'logs') {
+        await loadSystemLogs();
+      }
+    } catch (err) {
+      notify(err.message || 'Ceza tahsil edilirken hata oluştu', 'error');
+    } finally {
+      setCollectingId(null);
+    }
+  };
+
+  const handleCategoryFilterChange = (cat) => {
+    setLogCategoryFilter(cat);
+    loadSystemLogs(cat, logLevelFilter);
+  };
+
+  const handleLevelFilterChange = (lvl) => {
+    setLogLevelFilter(lvl);
+    loadSystemLogs(logCategoryFilter, lvl);
+  };
+
+  const formatTimestamp = (ts) => {
+    if (!ts) return '-';
+    try {
+      const d = new Date(ts);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString('tr-TR', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+      }
+    } catch {
+      // fallback
+    }
+    return String(ts).replace('T', ' ').slice(0, 19);
+  };
+
+  const getLevelBadge = (level) => {
+    switch (level?.toUpperCase()) {
+      case 'ERROR':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
+            <AlertCircle className="w-3 h-3 text-rose-600" />
+            ERROR
+          </span>
+        );
+      case 'WARNING':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+            <AlertTriangle className="w-3 h-3 text-amber-600" />
+            WARNING
+          </span>
+        );
+      case 'INFO':
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            INFO
+          </span>
+        );
+    }
+  };
+
+  const getCategoryBadge = (category) => {
+    const cat = category?.toUpperCase() || 'SYSTEM';
+    const colorMap = {
+      AUTH: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+      BORROWING: 'bg-sky-100 text-sky-800 border-sky-200',
+      RESERVATION: 'bg-purple-100 text-purple-800 border-purple-200',
+      PENALTY: 'bg-rose-100 text-rose-800 border-rose-200',
+      REVIEW: 'bg-amber-100 text-amber-800 border-amber-200',
+      CATALOG: 'bg-teal-100 text-teal-800 border-teal-200',
+      SYSTEM: 'bg-slate-100 text-slate-800 border-slate-200',
+    };
+    const color = colorMap[cat] || colorMap.SYSTEM;
+    return (
+      <span
+        className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${color}`}
+      >
+        {cat}
+      </span>
+    );
+  };
 
   useEffect(() => {
     loadAllCatalogData();
   }, []);
+
+  useEffect(() => {
+    if (subTab === 'logs') {
+      loadSystemLogs(logCategoryFilter, logLevelFilter);
+    } else if (subTab === 'penalties') {
+      api
+        .getUnpaidPenalties()
+        .then((res) =>
+          setUnpaidPenalties(
+            res || { total_unpaid_amount: 0, debtor_count: 0, items: [] }
+          )
+        )
+        .catch(() => {});
+    }
+  }, [subTab]);
 
   // Open Modals
   const openCreateModal = (type) => {
@@ -563,9 +723,33 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
             <Clock className="w-4 h-4" />
             Ödünç İşlemleri & Gecikme Simülasyonu ({borrowings.length})
           </button>
+
+          <button
+            onClick={() => setSubTab('penalties')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              subTab === 'penalties'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            Ödenmemiş Borçlar ({unpaidPenalties?.debtor_count ?? 0})
+          </button>
+
+          <button
+            onClick={() => setSubTab('logs')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              subTab === 'logs'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+            }`}
+          >
+            <ScrollText className="w-4 h-4" />
+            Sistem Logları ({systemLogs.length})
+          </button>
         </div>
 
-        {subTab !== 'borrowings' && (
+        {!['borrowings', 'penalties', 'logs'].includes(subTab) && (
           <button
             onClick={() =>
               openCreateModal(
@@ -592,8 +776,193 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
         )}
       </div>
 
+      {/* Ödenmemiş Borçlar KPI Özet Kartları (subTab === 'penalties') */}
+      {subTab === 'penalties' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-50 to-red-100/70 border border-rose-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">
+                  Tahsil Edilmemiş Borç
+                </span>
+                <Receipt className="w-5 h-5 text-rose-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-rose-900 mt-2">
+                {Number(unpaidPenalties?.total_unpaid_amount || 0).toFixed(2)} TL
+              </div>
+              <p className="text-[11px] text-rose-600/90 mt-1">
+                Kütüphaneye olan tüm açık borç tutarı
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-100/70 border border-amber-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">
+                  Borçlu Kayıt Sayısı
+                </span>
+                <Users className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-amber-900 mt-2">
+                {unpaidPenalties?.debtor_count || 0} Adet
+              </div>
+              <p className="text-[11px] text-amber-700/90 mt-1">
+                Ceza borcu bulunan toplam ödünç kaydı
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-red-700 uppercase tracking-wider">
+                  Aktif Gecikmede Olanlar
+                </span>
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-red-900 mt-2">
+                {(unpaidPenalties?.items || []).filter((i) => i.status === 'OVERDUE').length} Kayıt
+              </div>
+              <p className="text-[11px] text-red-600/90 mt-1">
+                Teslim tarihi geçmiş aktif ödünçler
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-indigo-50 border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                  İade Edilmiş Borçlular
+                </span>
+                <Clock className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-indigo-900 mt-2">
+                {(unpaidPenalties?.items || []).filter((i) => i.status === 'RETURNED').length} Kayıt
+              </div>
+              <p className="text-[11px] text-slate-600 mt-1">
+                Kitabı teslim etmiş ancak cezayı ödememiş
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setPenaltyStatusFilter('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  penaltyStatusFilter === 'ALL'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tümü ({(unpaidPenalties?.items || []).length})
+              </button>
+              <button
+                onClick={() => setPenaltyStatusFilter('OVERDUE')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  penaltyStatusFilter === 'OVERDUE'
+                    ? 'bg-white text-rose-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Aktif Gecikenler ({(unpaidPenalties?.items || []).filter((i) => i.status === 'OVERDUE').length})
+              </button>
+              <button
+                onClick={() => setPenaltyStatusFilter('RETURNED')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  penaltyStatusFilter === 'RETURNED'
+                    ? 'bg-white text-amber-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                İade Edilmiş ({(unpaidPenalties?.items || []).filter((i) => i.status === 'RETURNED').length})
+              </button>
+            </div>
+
+            <button
+              onClick={async () => {
+                try {
+                  const res = await api.getUnpaidPenalties();
+                  setUnpaidPenalties(res || { total_unpaid_amount: 0, debtor_count: 0, items: [] });
+                  notify('Borçlu kayıtları güncellendi.', 'success');
+                } catch {
+                  notify('Borçlu kayıtları güncellenemedi.', 'error');
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors cursor-pointer shadow-2xs"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Borçları Yenile
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Responsive Tables (overflow-x-auto) */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        {/* Sistem Logları Filtre ve Yenileme Çubuğu */}
+        {subTab === 'logs' && (
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-1.5">
+                <Filter className="w-4 h-4 text-slate-500" />
+                <span className="text-xs font-bold text-slate-700">Filtrele:</span>
+              </div>
+
+              {/* Kategori Filtresi */}
+              <select
+                value={logCategoryFilter}
+                onChange={(e) => handleCategoryFilterChange(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                <option value="">Tüm Kategoriler</option>
+                <option value="AUTH">AUTH (Giriş / Kayıt)</option>
+                <option value="BORROWING">BORROWING (Ödünç / İade)</option>
+                <option value="RESERVATION">RESERVATION (Rezervasyon)</option>
+                <option value="PENALTY">PENALTY (Ceza & Tahsilat)</option>
+                <option value="REVIEW">REVIEW (Yorum & Değerlendirme)</option>
+                <option value="CATALOG">CATALOG (Katalog İşlemleri)</option>
+                <option value="SYSTEM">SYSTEM (Sistem)</option>
+              </select>
+
+              {/* Seviye Filtresi */}
+              <select
+                value={logLevelFilter}
+                onChange={(e) => handleLevelFilterChange(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                <option value="">Tüm Seviyeler</option>
+                <option value="INFO">INFO (Bilgi)</option>
+                <option value="WARNING">WARNING (Uyarı)</option>
+                <option value="ERROR">ERROR (Hata)</option>
+              </select>
+
+              {(logCategoryFilter || logLevelFilter) && (
+                <button
+                  onClick={() => {
+                    setLogCategoryFilter('');
+                    setLogLevelFilter('');
+                    loadSystemLogs('', '');
+                  }}
+                  className="text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer underline ml-1"
+                >
+                  Filtreleri Temizle
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs text-slate-500 font-medium">
+                Son <strong>{systemLogs.length}</strong> işlem (Maks 100)
+              </span>
+              <button
+                onClick={() => loadSystemLogs(logCategoryFilter, logLevelFilter)}
+                disabled={logsLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold border border-slate-200 shadow-2xs transition-colors cursor-pointer disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${logsLoading ? 'animate-spin' : ''}`} />
+                Logları Yenile
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           {subTab === 'books' && (
             <table className="w-full text-left border-collapse min-w-[720px]">
@@ -933,6 +1302,171 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                       </tr>
                     );
                   })
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {/* Ödenmemiş Borçlar Tablosu */}
+          {subTab === 'penalties' && (
+            <table className="w-full text-left border-collapse min-w-[840px]">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <th className="py-3.5 px-4">Borçlu Kullanıcı</th>
+                  <th className="py-3.5 px-4">Kitap</th>
+                  <th className="py-3.5 px-4">Ödünç / Teslim / İade</th>
+                  <th className="py-3.5 px-4">Gecikme Durumu</th>
+                  <th className="py-3.5 px-4">Borç Tutarı</th>
+                  <th className="py-3.5 px-4 text-right">Tahsilat İşlemi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {filteredPenalties.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center">
+                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 mb-2">
+                        <CheckCircle2 className="w-6 h-6" />
+                      </div>
+                      <div className="text-sm font-bold text-slate-800">
+                        Ödenmemiş ceza borcu bulunmuyor
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Tebrikler! Seçilen kriterlere uyan gecikmiş veya tahsil edilmemiş herhangi bir ceza borcu yoktur.
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPenalties.map((item) => {
+                    const isReturned = item.status === 'RETURNED';
+                    const isCollecting = collectingId === item.borrowing_id;
+                    const penalty = Number(item.penalty_amount || 0);
+
+                    return (
+                      <tr key={item.borrowing_id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-slate-900">
+                            {item.user_full_name}
+                          </div>
+                          <div className="text-xs text-slate-500">{item.user_email}</div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-slate-800">
+                            {item.book_title}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-400">
+                            ID: {item.book_id}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-600 space-y-0.5">
+                          <div>
+                            <span className="text-slate-400">Alış: </span>
+                            <span className="font-medium">{item.borrow_date}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Son Teslim: </span>
+                            <span className="font-bold text-rose-600">{item.due_date}</span>
+                          </div>
+                          {item.return_date && (
+                            <div>
+                              <span className="text-emerald-600">İade: </span>
+                              <span className="font-semibold text-emerald-700">
+                                {String(item.return_date).slice(0, 10)}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {isReturned ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                <Clock className="w-3 h-3 text-amber-700" />
+                                İade Edildi (Ödenmedi)
+                              </span>
+                              <div className="text-[11px] text-slate-500 font-medium">
+                                Toplam {item.overdue_days} gün gecikme
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-600 text-white shadow-2xs">
+                                <AlertTriangle className="w-3 h-3" />
+                                OVERDUE ({item.overdue_days} Gün Gecikti)
+                              </span>
+                              <div className="text-[11px] text-rose-600 font-semibold">
+                                Kitap henüz teslim edilmedi
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="text-base font-extrabold text-rose-700">
+                            {penalty.toFixed(2)} TL
+                          </div>
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800">
+                            Tahsil Edilmedi
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            onClick={() => handleCollectPenalty(item)}
+                            disabled={isCollecting}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                            title="Elden ödeme alındığında borcu kapat"
+                          >
+                            <Check className={`w-4 h-4 ${isCollecting ? 'animate-spin' : ''}`} />
+                            {isCollecting ? 'Tahsil Ediliyor...' : 'Tahsil Et / Borcu Kapat'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {/* Sistem Logları Tablosu */}
+          {subTab === 'logs' && (
+            <table className="w-full text-left border-collapse min-w-[760px]">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <th className="py-3.5 px-4 w-44">Tarih / Saat</th>
+                  <th className="py-3.5 px-4 w-32">Kategori</th>
+                  <th className="py-3.5 px-4 w-28">Seviye</th>
+                  <th className="py-3.5 px-4">Detaylı Açıklama</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {systemLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-12 text-center text-slate-400 text-xs">
+                      {logsLoading ? (
+                        <div className="flex items-center justify-center gap-2 text-indigo-600 font-semibold">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Sistem logları yükleniyor...
+                        </div>
+                      ) : (
+                        'Seçilen filtrelere uygun sistem logu bulunamadı.'
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  systemLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3.5 px-4 text-xs font-mono text-slate-600 whitespace-nowrap">
+                        {formatTimestamp(log.timestamp)}
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        {getCategoryBadge(log.category)}
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        {getLevelBadge(log.level)}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-800 font-medium break-words text-xs sm:text-sm">
+                        {log.message}
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>

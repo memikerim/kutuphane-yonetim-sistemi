@@ -131,6 +131,15 @@ export const api = {
   getAdminBorrowings: () => request('/admin/borrowings'),
   simulateOverdue: (id) =>
     request(`/admin/borrowings/${id}/simulate-overdue`, { method: 'PATCH' }),
+  getUnpaidPenalties: () => request('/admin/unpaid-penalties'),
+  getSystemLogs: (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.category) searchParams.set('category', params.category);
+    if (params.level) searchParams.set('level', params.level);
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    const qs = searchParams.toString();
+    return request(`/admin/logs${qs ? `?${qs}` : ''}`);
+  },
 
 
   // Reservations
