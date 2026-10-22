@@ -247,14 +247,20 @@ export default function BookDetailModal({
         <div className="p-5 sm:p-6 overflow-y-auto space-y-6">
           {/* Book Metadata Card */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 bg-slate-50/70 p-4 sm:p-5 rounded-2xl border border-slate-200/80">
-            {/* Left Cover Visual */}
-            <div className="relative rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 shadow-md min-h-[220px] max-h-[340px] flex items-center justify-center text-center group">
+            {/* Left Cover Visual (Kitap Kapağı Tam Sığdırma) */}
+            <div className="relative rounded-2xl overflow-hidden bg-gradient-to-b from-slate-100 to-slate-200/80 border border-slate-200/90 shadow-md min-h-[240px] max-h-[360px] p-4 flex items-center justify-center text-center group">
               {book.cover_url ? (
                 <>
                   <img
                     src={book.cover_url}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-25 scale-125 pointer-events-none"
+                  />
+                  <img
+                    src={book.cover_url}
                     alt={book.title}
-                    className="w-full h-full object-cover max-h-[340px] group-hover:scale-105 transition-transform duration-300"
+                    className="relative z-0 max-h-[320px] max-w-full object-contain rounded-xl shadow-lg group-hover:scale-105 transition-transform duration-300"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       if (e.currentTarget.nextElementSibling) {
@@ -263,7 +269,7 @@ export default function BookDetailModal({
                       }
                     }}
                   />
-                  <div className="hidden flex-col items-center justify-center p-6 w-full h-full min-h-[220px] bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 text-white">
+                  <div className="hidden flex-col items-center justify-center p-6 w-full h-full min-h-[220px] bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 text-white rounded-xl">
                     <BookOpen className="w-14 h-14 mb-3 opacity-90" />
                     <h3 className="font-bold text-sm line-clamp-2">{book.title}</h3>
                     <span className="mt-2 px-2.5 py-0.5 rounded-full text-[11px] bg-white/20 backdrop-blur-xs font-medium">
@@ -272,7 +278,7 @@ export default function BookDetailModal({
                   </div>
                 </>
               ) : (
-                <div className="flex flex-col items-center justify-center p-6 w-full h-full min-h-[220px] bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 text-white">
+                <div className="flex flex-col items-center justify-center p-6 w-full h-full min-h-[220px] bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 text-white rounded-xl shadow-inner">
                   <BookOpen className="w-14 h-14 mb-3 opacity-90" />
                   <h3 className="font-bold text-sm line-clamp-2">{book.title}</h3>
                   <span className="mt-2 px-2.5 py-0.5 rounded-full text-[11px] bg-white/20 backdrop-blur-xs font-medium">
@@ -282,7 +288,7 @@ export default function BookDetailModal({
               )}
 
               {averageRating && (
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-slate-900/85 backdrop-blur-md border border-white/20 text-amber-300 text-xs font-bold shadow-lg">
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-slate-900/85 backdrop-blur-md border border-white/20 text-amber-300 text-xs font-bold shadow-lg z-10">
                   <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
                   <span>{averageRating} / 5.0</span>
                   <span className="text-[10px] text-slate-300">({reviews.length})</span>

@@ -465,13 +465,23 @@ export default function App() {
                       className="group bg-white rounded-2xl border border-slate-200/90 hover:border-indigo-300 shadow-2xs hover:shadow-xl hover:shadow-indigo-100/50 transition-all duration-200 flex flex-col justify-between overflow-hidden cursor-pointer"
                     >
                       <div>
-                        {/* Book Cover Image / Styled Placeholder Banner */}
-                        <div className="relative w-full h-48 bg-slate-100 border-b border-slate-100 overflow-hidden flex items-center justify-center">
+                        {/* Book Cover Image / Styled Showcase Banner (Kitap Kapağı Tam Sığdırma) */}
+                        <div className="relative w-full h-64 bg-gradient-to-b from-slate-100/90 via-slate-50 to-slate-100/80 border-b border-slate-100 p-3.5 flex items-center justify-center overflow-hidden">
+                          {/* Arka Planda Yumuşak Bulanık Atmosfer Katmanı */}
+                          {book.cover_url && (
+                            <img
+                              src={book.cover_url}
+                              alt=""
+                              aria-hidden="true"
+                              className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-20 scale-125 pointer-events-none"
+                            />
+                          )}
+
                           {book.cover_url ? (
                             <img
                               src={book.cover_url}
                               alt={book.title}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              className="relative z-0 max-h-56 max-w-[85%] object-contain rounded-lg shadow-md group-hover:shadow-xl group-hover:scale-105 transition-all duration-300"
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
                                 if (e.currentTarget.nextElementSibling) {
