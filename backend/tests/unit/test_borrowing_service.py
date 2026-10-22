@@ -58,6 +58,67 @@ def test_create_borrowing_book_not_found(db_session, test_user):
         service.create_borrowing(db_session, test_user, data)
 
 
+def test_create_borrowing_duplicate_active_same_book_rejected(db_session, test_user, test_book):
+    """Kullanıcı elinde aktif (iade edilmemiş) bir kitap varken aynı kitabı ikinci kez ödünç alamaz."""
+    data = BorrowingCreate(
+        book_id=test_book.id,
+        due_date=date.today() + timedelta(days=14),
+    )
+    service.create_borrowing(db_session, test_user, data)
+
+    with pytest.raises(service.BusinessRuleError) as exc_info:
+        service.create_borrowing(db_session, test_user, data)
+    assert "zaten şu an üzerinizde" in str(exc_info.value).lower()
+
+
+def test_create_borrowing_same_book_allowed_after_return(db_session, test_user, test_book):
+    """Kullanıcı kitabı iade ettikten (RETURNED) sonra aynı kitabı tekrar ödünç alabilmelidir."""
+    data = BorrowingCreate(
+        book_id=test_book.id,
+        due_date=date.today() + timedelta(days=14),
+    )
+    b1 = service.create_borrowing(db_session, test_user, data)
+    service.return_borrowing(db_session, test_user, b1.id)
+
+    b2 = service.create_borrowing(db_session, test_user, data)
+    assert b2.id != b1.id
+    assert b2.status == BorrowingStatus.ACTIVE
+
+
+def test_create_borrowing_max_three_active_books_quota_rejected(db_session, test_user):
+    """Bir kullanıcı aynı anda en fazla 3 adet aktif ödünç kitaba sahip olabilir (4. kitap reddedilir)."""
+    from app.modules.catalog.models import Book
+
+    books = []
+    for i in range(4):
+        b = Book(
+            title=f"Kota Test Kitap {i+1}",
+            isbn=f"978000000100{i}",
+            published_year=2024,
+            stock_count=5,
+        )
+        db_session.add(b)
+        books.append(b)
+    db_session.commit()
+
+    # İlk 3 kitap başarıyla ödünç alınır
+    for i in range(3):
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(book_id=books[i].id, due_date=date.today() + timedelta(days=14)),
+        )
+
+    # 4. kitap ödünç alınmak istendiğinde kota hatası fırlatılır
+    with pytest.raises(service.BusinessRuleError) as exc_info:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(book_id=books[3].id, due_date=date.today() + timedelta(days=14)),
+        )
+    assert "en fazla 3 adet" in str(exc_info.value).lower()
+
+
 def test_return_borrowing_success(db_session, test_user, test_book):
     data = BorrowingCreate(
         book_id=test_book.id,

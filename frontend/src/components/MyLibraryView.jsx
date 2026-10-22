@@ -95,13 +95,24 @@ export default function MyLibraryView({ notify, onSelectBook }) {
             Ödünç aldığınız kitapları görüntüleyip tek tıkla iade edebilir ve rezervasyon sıranızı takip edebilirsiniz.
           </p>
         </div>
-        <button
-          onClick={fetchAll}
-          className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Listeyi Yenile
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+          <div
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold border ${
+              activeBorrowingsCount >= 3
+                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+            }`}
+          >
+            Aktif Ödünç Kotası: {activeBorrowingsCount} / 3 Kitap
+          </div>
+          <button
+            onClick={fetchAll}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Listeyi Yenile
+          </button>
+        </div>
       </div>
 
       {/* Sub-navigation Tabs */}
@@ -326,3 +337,4 @@ export default function MyLibraryView({ notify, onSelectBook }) {
     </div>
   );
 }
+

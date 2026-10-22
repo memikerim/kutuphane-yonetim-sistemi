@@ -826,3 +826,4 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     </div>
   );
 }
+

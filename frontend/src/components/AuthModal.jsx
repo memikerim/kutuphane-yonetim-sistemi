@@ -224,3 +224,4 @@ export default function AuthModal({ initialMode = 'login', onClose, onSuccess, n
     </div>
   );
 }
+

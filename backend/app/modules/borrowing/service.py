@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,8 @@ from app.modules.borrowing.schemas import BorrowingCreate, ReservationCreate
 from app.modules.catalog.models import Book
 
 logger = logging.getLogger(__name__)
+
+MAX_ACTIVE_BORROWINGS = 3
 
 
 class BusinessRuleError(Exception):
@@ -41,6 +43,43 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
             user.id,
         )
         raise BusinessRuleError("İade tarihi (due_date) geçmiş bir tarih olamaz")
+
+    # Kural 1: Kullanıcı aynı kitabı iade etmeden (ACTIVE/OVERDUE iken) ikinci kez ödünç alamaz
+    existing_active_for_book = db.scalar(
+        select(Borrowing).where(
+            Borrowing.user_id == user.id,
+            Borrowing.book_id == book.id,
+            Borrowing.status.in_([BorrowingStatus.ACTIVE, BorrowingStatus.OVERDUE]),
+        )
+    )
+    if existing_active_for_book is not None:
+        logger.warning(
+            "Ödünç alma başarısız: Kullanıcının elinde aynı kitaptan aktif ödünç var -> book_id: %s, user_id: %s",
+            book.id,
+            user.id,
+        )
+        raise BusinessRuleError(
+            "Bu kitap zaten şu an üzerinizde ödünç alınmış durumda. İade etmeden tekrar ödünç alamazsınız."
+        )
+
+    # Kural 2: Bir kullanıcı aynı anda en fazla MAX_ACTIVE_BORROWINGS (3) adet aktif kitap tutabilir
+    active_count = db.scalar(
+        select(func.count())
+        .select_from(Borrowing)
+        .where(
+            Borrowing.user_id == user.id,
+            Borrowing.status.in_([BorrowingStatus.ACTIVE, BorrowingStatus.OVERDUE]),
+        )
+    )
+    if (active_count or 0) >= MAX_ACTIVE_BORROWINGS:
+        logger.warning(
+            "Ödünç alma başarısız: Maksimum aktif kitap kotası (%d) doldu -> user_id: %s",
+            MAX_ACTIVE_BORROWINGS,
+            user.id,
+        )
+        raise BusinessRuleError(
+            f"Aynı anda en fazla {MAX_ACTIVE_BORROWINGS} adet kitap ödünç alabilirsiniz. Yeni kitap almak için mevcut kitaplarınızdan birini iade edin."
+        )
 
     # Race condition koruması için atomic update
     book.stock_count = Book.stock_count - 1
