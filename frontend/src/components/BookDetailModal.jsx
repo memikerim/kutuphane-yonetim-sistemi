@@ -16,6 +16,8 @@ import {
   Trash2,
   ShieldAlert,
   User,
+  ThumbsUp,
+  ThumbsDown,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -50,6 +52,7 @@ export default function BookDetailModal({
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewError, setReviewError] = useState(null);
   const [deletingReviewId, setDeletingReviewId] = useState(null);
+  const [reactingReviewId, setReactingReviewId] = useState(null);
 
   const isAdmin = Boolean(user?.roles?.includes('ADMIN'));
 
@@ -178,6 +181,27 @@ export default function BookDetailModal({
       notify(err.message || 'Yorum silinemedi.', 'error');
     } finally {
       setDeletingReviewId(null);
+    }
+  };
+
+  const handleReactReview = async (reviewId, value) => {
+    if (!user) {
+      notify('Yorumları beğenmek veya beğenmemek için lütfen giriş yapın.', 'info');
+      onClose();
+      onOpenAuth('login');
+      return;
+    }
+
+    setReactingReviewId(reviewId);
+    try {
+      const updatedReview = await api.reactToReview(reviewId, value);
+      setReviews((prev) =>
+        prev.map((r) => (r.id === reviewId ? updatedReview : r))
+      );
+    } catch (err) {
+      notify(err.message || 'Tepki kaydedilemedi.', 'error');
+    } finally {
+      setReactingReviewId(null);
     }
   };
 
@@ -574,12 +598,28 @@ export default function BookDetailModal({
             ) : (
               <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                 {reviews.map((rev) => {
-                  const isOwnReview = Boolean(user && user.id === rev.user_id);
-                  const canDelete = Boolean(isOwnReview || isAdmin);
+                  const isOwnReview = Boolean(
+                    user && String(user.id) === String(rev.user_id)
+                  );
+                  const hasLiked = Boolean(
+                    user &&
+                      (rev.liked_user_ids || []).some(
+                        (uid) => String(uid) === String(user.id)
+                      )
+                  );
+                  const hasDisliked = Boolean(
+                    user &&
+                      (rev.disliked_user_ids || []).some(
+                        (uid) => String(uid) === String(user.id)
+                      )
+                  );
+                  const likesCount = rev.likes_count || 0;
+                  const dislikesCount = rev.dislikes_count || 0;
+
                   return (
                     <div
                       key={rev.id}
-                      className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5"
+                      className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-2"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -609,7 +649,7 @@ export default function BookDetailModal({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] text-slate-400">
                             {new Date(rev.created_at).toLocaleDateString('tr-TR', {
                               day: '2-digit',
@@ -619,31 +659,103 @@ export default function BookDetailModal({
                               minute: '2-digit',
                             })}
                           </span>
-                          {canDelete && (
+
+                          {/* Kullanıcı kendi yorumunu silebilir; diğer kullanıcıların yorumlarını SADECE ADMIN silebilir */}
+                          {isOwnReview ? (
                             <button
                               type="button"
                               onClick={() => handleDeleteReview(rev.id)}
                               disabled={deletingReviewId === rev.id}
-                              title={
-                                isOwnReview
-                                  ? 'Kendi yorumunuzu silin'
-                                  : 'Yönetici yetkisiyle bu yorumu silin'
-                              }
+                              title="Kendi yorumunuzu silin"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors disabled:opacity-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              {deletingReviewId === rev.id ? 'Siliniyor...' : 'Yorumumu Sil'}
+                            </button>
+                          ) : isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteReview(rev.id)}
+                              disabled={deletingReviewId === rev.id}
+                              title="Yönetici yetkisiyle bu yorumu silin"
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors disabled:opacity-50 cursor-pointer"
                             >
                               <Trash2 className="w-3 h-3" />
                               {deletingReviewId === rev.id
                                 ? 'Siliniyor...'
-                                : isOwnReview
-                                ? 'Yorumu Sil'
                                 : 'Yorumu Sil (Admin)'}
                             </button>
-                          )}
+                          ) : null}
                         </div>
                       </div>
+
                       {rev.comment && (
                         <p className="text-xs text-slate-600 leading-relaxed">{rev.comment}</p>
                       )}
+
+                      {/* Yorum Tepkileri (Beğen / Beğenme - Faydalı / Faydalı Değil) */}
+                      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                        {!isOwnReview ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-400">
+                              Bu yorumu faydalı buldunuz mu?
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleReactReview(rev.id, 1)}
+                              disabled={reactingReviewId === rev.id}
+                              title="Beğen / Faydalı Buldum (Thumbs Up)"
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer disabled:opacity-50 ${
+                                hasLiked
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : 'bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border-slate-200'
+                              }`}
+                            >
+                              <ThumbsUp
+                                className={`w-3.5 h-3.5 ${
+                                  hasLiked ? 'fill-emerald-600 text-emerald-700' : ''
+                                }`}
+                              />
+                              <span>Beğen</span>
+                              <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] font-bold">
+                                {likesCount}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleReactReview(rev.id, -1)}
+                              disabled={reactingReviewId === rev.id}
+                              title="Beğenme / Katılmıyorum (Thumbs Down)"
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer disabled:opacity-50 ${
+                                hasDisliked
+                                  ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                  : 'bg-slate-50 hover:bg-amber-50 text-slate-600 hover:text-amber-800 border-slate-200'
+                              }`}
+                            >
+                              <ThumbsDown
+                                className={`w-3.5 h-3.5 ${
+                                  hasDisliked ? 'fill-amber-600 text-amber-700' : ''
+                                }`}
+                              />
+                              <span>Beğenme</span>
+                              <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] font-bold">
+                                {dislikesCount}
+                              </span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                            <span>Yorumunuza gelen tepkiler:</span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                              <ThumbsUp className="w-3 h-3" /> {likesCount} Beğeni
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                              <ThumbsDown className="w-3 h-3" /> {dislikesCount} Beğenmeme
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

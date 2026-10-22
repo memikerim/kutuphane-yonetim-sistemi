@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.modules.auth.models import RoleName, User
 from app.modules.borrowing.models import Borrowing
 from app.modules.catalog.models import Book
-from app.modules.review.models import Review
+from app.modules.review.models import Review, ReviewReaction
 from app.modules.review.schemas import ReviewCreate
 
 logger = logging.getLogger(__name__)
@@ -284,4 +284,52 @@ def delete_review(db: Session, user: User, review_id: uuid.UUID) -> None:
         user.id,
         is_admin,
     )
+
+
+def react_to_review(db: Session, user: User, review_id: uuid.UUID, value: int) -> Review:
+    """
+    Diğer kullanıcıların yorumlarına Beğen / Faydalı (1: Thumbs Up) veya
+    Beğenme / Katılmıyorum (-1: Thumbs Down) tepkisi bırakır.
+    Aynı tepkiye tekrar tıklanırsa tepki geri çekilir (toggle).
+    """
+    if value not in (1, -1):
+        raise BusinessRuleError("Geçersiz tepki değeri (1 veya -1 olmalıdır).")
+
+    review = db.get(Review, review_id)
+    if not review:
+        raise NotFoundError("Tepki bırakılmak istenen yorum bulunamadı")
+
+    if review.user_id == user.id:
+        raise BusinessRuleError("Kendi yorumunuza beğeni/beğenmeme tepkisi bırakamazsınız.")
+
+    existing = db.scalar(
+        select(ReviewReaction).where(
+            ReviewReaction.review_id == review.id,
+            ReviewReaction.user_id == user.id,
+        )
+    )
+
+    if existing:
+        if existing.value == value:
+            db.delete(existing)
+            action = "removed"
+        else:
+            existing.value = value
+            action = "updated"
+    else:
+        db.add(ReviewReaction(review_id=review.id, user_id=user.id, value=value))
+        action = "added"
+
+    db.commit()
+    db.expire(review, ["reactions"])
+    db.refresh(review)
+    logger.info(
+        "Yorum tepkisi güncellendi (%s) -> review_id: %s, user_id: %s, value: %s",
+        action,
+        review.id,
+        user.id,
+        value,
+    )
+    return review
+
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from app.core.database import DbSession
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.review import service
-from app.modules.review.schemas import ReviewCreate, ReviewRead
+from app.modules.review.schemas import ReviewCreate, ReviewReactionCreate, ReviewRead
 
 router = APIRouter(prefix="/reviews", tags=["Review & Rating"])
 
@@ -91,4 +91,24 @@ def get_reviews(
 def delete_review(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
     handle_service_error(service.delete_review, db, current_user, id)
     return None
+
+
+@router.post(
+    "/{id}/react",
+    response_model=ReviewRead,
+    summary="Yoruma Beğen (Thumbs Up) veya Beğenme (Thumbs Down) tepkisi bırak",
+    description=(
+        "Kullanıcılar diğer okuyucuların yorumlarına Beğen / Faydalı (1) veya "
+        "Beğenme / Katılmıyorum (-1) tepkisi bırakabilir. Aynı tepkiye tekrar tıklanırsa "
+        "tepki geri çekilir."
+    ),
+)
+def react_to_review(
+    id: uuid.UUID,
+    data: ReviewReactionCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    return handle_service_error(service.react_to_review, db, current_user, id, data.value)
+
 

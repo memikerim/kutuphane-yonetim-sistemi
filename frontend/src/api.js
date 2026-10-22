@@ -146,5 +146,10 @@ export const api = {
     request('/reviews', { method: 'POST', body: JSON.stringify(data) }),
   deleteReview: (id) =>
     request(`/reviews/${id}`, { method: 'DELETE' }),
+  reactToReview: (id, value) =>
+    request(`/reviews/${id}/react`, {
+      method: 'POST',
+      body: JSON.stringify({ value }),
+    }),
 };
 

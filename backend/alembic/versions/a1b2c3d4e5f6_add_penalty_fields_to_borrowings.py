@@ -18,14 +18,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'borrowings',
-        sa.Column('penalty_amount', sa.Float(), server_default='0.0', nullable=False),
-    )
-    op.add_column(
-        'borrowings',
-        sa.Column('is_penalty_paid', sa.Boolean(), server_default=sa.text('false'), nullable=False),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_cols = {c['name'] for c in inspector.get_columns('borrowings')}
+
+    if 'penalty_amount' not in existing_cols:
+        op.add_column(
+            'borrowings',
+            sa.Column('penalty_amount', sa.Float(), server_default='0.0', nullable=False),
+        )
+    if 'is_penalty_paid' not in existing_cols:
+        op.add_column(
+            'borrowings',
+            sa.Column('is_penalty_paid', sa.Boolean(), server_default=sa.text('false'), nullable=False),
+        )
 
 
 def downgrade() -> None:

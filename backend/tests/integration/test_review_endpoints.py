@@ -208,3 +208,74 @@ def test_admin_can_delete_other_user_review_and_normal_user_cannot(
     assert admin_del_resp.status_code == 204
 
 
+def test_react_to_review_thumbs_up_down_and_toggle(
+    client, db_session, auth_headers, test_book
+):
+    """Kullanıcı diğer kullanıcıların yorumuna Beğen (1) / Beğenme (-1) tepkisi bırakabilmelidir."""
+    _borrow_book_for_user(client, auth_headers, test_book.id)
+
+    create_resp = client.post(
+        "/api/v1/reviews",
+        json={"book_id": str(test_book.id), "rating": 5, "comment": "Çok faydalı bir inceleme."},
+        headers=auth_headers,
+    )
+    assert create_resp.status_code == 201
+    review_id = create_resp.json()["id"]
+
+    # Kullanıcı kendi yorumuna tepki bırakamaz
+    self_react = client.post(
+        f"/api/v1/reviews/{review_id}/react",
+        json={"value": 1},
+        headers=auth_headers,
+    )
+    assert self_react.status_code == 400
+
+    # Başka bir normal kullanıcı oluştur
+    user_role = db_session.query(Role).filter_by(name=RoleName.USER).first()
+    other_user = User(
+        email="reactor@example.com",
+        password_hash=hash_password("pass123"),
+        first_name="Reactor",
+        last_name="User",
+        roles=[user_role],
+    )
+    db_session.add(other_user)
+    db_session.commit()
+    db_session.refresh(other_user)
+    other_token = create_access_token(
+        user_id=other_user.id, email=other_user.email, roles=["USER"]
+    )
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    # 1) Thumbs Up (Beğen: 1)
+    like_resp = client.post(
+        f"/api/v1/reviews/{review_id}/react",
+        json={"value": 1},
+        headers=other_headers,
+    )
+    assert like_resp.status_code == 200
+    assert like_resp.json()["likes_count"] == 1
+    assert like_resp.json()["dislikes_count"] == 0
+
+    # 2) Thumbs Down'a geçiş (Beğenme: -1)
+    dislike_resp = client.post(
+        f"/api/v1/reviews/{review_id}/react",
+        json={"value": -1},
+        headers=other_headers,
+    )
+    assert dislike_resp.status_code == 200
+    assert dislike_resp.json()["likes_count"] == 0
+    assert dislike_resp.json()["dislikes_count"] == 1
+
+    # 3) Aynı tepkiye tekrar tıklayınca geri çekme (Toggle off)
+    toggle_resp = client.post(
+        f"/api/v1/reviews/{review_id}/react",
+        json={"value": -1},
+        headers=other_headers,
+    )
+    assert toggle_resp.status_code == 200
+    assert toggle_resp.json()["likes_count"] == 0
+    assert toggle_resp.json()["dislikes_count"] == 0
+
+
+

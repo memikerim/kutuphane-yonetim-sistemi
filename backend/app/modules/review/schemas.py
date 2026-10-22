@@ -1,7 +1,16 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ReviewReactionCreate(BaseModel):
+    value: Literal[1, -1] = Field(
+        ...,
+        description="1: Beğen / Faydalı Buldum (Thumbs Up), -1: Beğenme / Katılmıyorum (Thumbs Down)",
+    )
+
 
 
 class ReviewCreate(BaseModel):
@@ -31,6 +40,14 @@ class ReviewRead(BaseModel):
     book_id: uuid.UUID = Field(..., description="Kitabın benzersiz kimliği")
     rating: int = Field(..., ge=1, le=5, description="Verilen puan (1-5)")
     comment: str | None = Field(None, description="Yorum metni")
+    likes_count: int = Field(0, description="Beğeni / Faydalı (Thumbs Up) sayısı")
+    dislikes_count: int = Field(0, description="Beğenmeme / Faydasız (Thumbs Down) sayısı")
+    liked_user_ids: list[uuid.UUID] = Field(
+        default_factory=list, description="Bu yorumu beğenen kullanıcıların ID listesi"
+    )
+    disliked_user_ids: list[uuid.UUID] = Field(
+        default_factory=list, description="Bu yorumu beğenmeyen kullanıcıların ID listesi"
+    )
     created_at: datetime = Field(..., description="Yorumun oluşturulma tarihi")
 
     model_config = ConfigDict(
