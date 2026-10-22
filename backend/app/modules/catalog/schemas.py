@@ -57,6 +57,7 @@ class BookBase(BaseModel):
     isbn: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=17)]
     published_year: int | None = None
     stock_count: int = Field(default=0, ge=0)
+    cover_url: str | None = None
 
 class BookCreate(BookBase):
     publisher_id: uuid.UUID | None = None
@@ -68,6 +69,7 @@ class BookUpdate(BaseModel):
     isbn: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=17)] | None = None
     published_year: int | None = None
     stock_count: int | None = Field(default=None, ge=0)
+    cover_url: str | None = None
     publisher_id: uuid.UUID | None = None
     author_ids: list[uuid.UUID] | None = None
     category_ids: list[int] | None = None
@@ -80,6 +82,19 @@ class BookRead(BookBase):
     reserved_count: int = 0
     reservation_queue_user_ids: list[uuid.UUID] = []
     model_config = ConfigDict(from_attributes=True)
+
+# --- ISBN Lookup ---
+class IsbnLookupResponse(BaseModel):
+    title: str = Field(..., description="Kitap başlığı")
+    isbn: str = Field(..., description="Sorgulanan ISBN")
+    published_year: int | None = Field(None, description="Yayın yılı")
+    cover_url: str | None = Field(None, description="Kitap kapağı görsel adresi")
+    publisher_id: uuid.UUID | None = Field(None, description="Eşleşen veya yeni oluşturulan yayınevi kimliği")
+    publisher_name: str | None = Field(None, description="Yayınevi adı")
+    author_ids: list[uuid.UUID] = Field(default_factory=list, description="Eşleşen veya yeni oluşturulan yazar kimlikleri")
+    author_names: list[str] = Field(default_factory=list, description="Yazar adları")
+    category_ids: list[int] = Field(default_factory=list, description="Eşleşen veya yeni oluşturulan kategori kimlikleri")
+    category_names: list[str] = Field(default_factory=list, description="Kategori adları")
 
 # --- Pagination ---
 class PaginatedBooksResponse(BaseModel):

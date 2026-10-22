@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   FastForward,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -43,6 +44,10 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const [categoryQuery, setCategoryQuery] = useState('');
   const [inlineCreating, setInlineCreating] = useState(false);
 
+  // ISBN lookup states
+  const [lookupIsbn, setLookupIsbn] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+
   // Forms
   const [bookForm, setBookForm] = useState({
     title: '',
@@ -52,6 +57,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     publisher_id: '',
     author_ids: [],
     category_ids: [],
+    cover_url: '',
   });
 
   const [authorForm, setAuthorForm] = useState({ first_name: '', last_name: '' });
@@ -109,6 +115,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     setPublisherQuery('');
     setAuthorQuery('');
     setCategoryQuery('');
+    setLookupIsbn('');
 
     if (type === 'book') {
       setBookForm({
@@ -119,6 +126,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
         publisher_id: publishers[0]?.id || '',
         author_ids: [],
         category_ids: [],
+        cover_url: '',
       });
     } else if (type === 'author') {
       setAuthorForm({ first_name: '', last_name: '' });
@@ -136,6 +144,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     setPublisherQuery('');
     setAuthorQuery('');
     setCategoryQuery('');
+    setLookupIsbn(item?.isbn || '');
 
     if (type === 'book') {
       setBookForm({
@@ -146,6 +155,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
         publisher_id: item.publisher?.id || '',
         author_ids: (item.authors || []).map((a) => a.id),
         category_ids: (item.categories || []).map((c) => c.id),
+        cover_url: item.cover_url || '',
       });
     } else if (type === 'author') {
       setAuthorForm({ first_name: item.first_name || '', last_name: item.last_name || '' });
@@ -290,6 +300,39 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     }
   };
 
+  const handleLookupIsbn = async (isbnToLookup) => {
+    const queryIsbn = (isbnToLookup || lookupIsbn || bookForm.isbn).trim();
+    if (!queryIsbn) {
+      notify('Lütfen sorgulanacak ISBN numarasını girin.', 'error');
+      return;
+    }
+    setLookupLoading(true);
+    try {
+      const data = await api.lookupIsbn(queryIsbn);
+      setBookForm((prev) => ({
+        ...prev,
+        title: data.title || prev.title,
+        isbn: data.isbn || prev.isbn,
+        published_year: data.published_year ?? prev.published_year,
+        cover_url: data.cover_url || prev.cover_url,
+        publisher_id: data.publisher_id || prev.publisher_id,
+        author_ids: data.author_ids?.length ? data.author_ids : prev.author_ids,
+        category_ids: data.category_ids?.length ? data.category_ids : prev.category_ids,
+      }));
+      setLookupIsbn(data.isbn || queryIsbn);
+      // Yeni yazar, yayınevi veya kategoriler veritabanında oluşturulduğundan listeleri güncelle
+      await loadAllCatalogData();
+      notify(
+        `"${data.title}" kitap bilgileri ISBN üzerinden başarıyla çekildi!`,
+        'success'
+      );
+    } catch (err) {
+      notify(err.message || 'Bu ISBN ile kitap bulunamadı', 'error');
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -322,6 +365,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
           isbn: bookForm.isbn.trim(),
           published_year: bookForm.published_year ? Number(bookForm.published_year) : null,
           stock_count: Number(bookForm.stock_count),
+          cover_url: bookForm.cover_url ? bookForm.cover_url.trim() : null,
           publisher_id: finalPublisherId,
           author_ids: finalAuthorIds,
           category_ids: finalCategoryIds,
@@ -923,6 +967,74 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
             <form onSubmit={handleSave} className="p-6 overflow-y-auto space-y-4">
               {modalType === 'book' && (
                 <>
+                  {/* ISBN İLE OTOMATİK DOLDURMA KUTUSU */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-50/90 via-purple-50/60 to-slate-50 border border-indigo-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-indigo-600" />
+                        ISBN ile Otomatik Doldur (OpenLibrary / Google Books)
+                      </span>
+                      {lookupLoading && (
+                        <span className="text-[11px] font-semibold text-indigo-600 flex items-center gap-1">
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                          Sorgulanıyor...
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={lookupIsbn}
+                          onChange={(e) => setLookupIsbn(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleLookupIsbn();
+                            }
+                          }}
+                          placeholder="Örn: 9780140328721 veya 9780451524935"
+                          className="w-full pl-9 pr-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleLookupIsbn()}
+                        disabled={lookupLoading}
+                        className="py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs shadow-indigo-200"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${lookupLoading ? 'animate-spin' : ''}`} />
+                        Bilgileri Getir
+                      </button>
+                    </div>
+
+                    {/* Hızlı Test Örnekleri */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-slate-500">
+                      <span className="font-semibold text-slate-600">Örnek ISBN'ler:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLookupIsbn('9780140328721');
+                          handleLookupIsbn('9780140328721');
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-mono font-medium transition-colors cursor-pointer"
+                      >
+                        9780140328721 (Fantastic Mr. Fox)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLookupIsbn('9780451524935');
+                          handleLookupIsbn('9780451524935');
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-mono font-medium transition-colors cursor-pointer"
+                      >
+                        9780451524935 (1984 - George Orwell)
+                      </button>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
                       Kitap Başlığı *
@@ -982,6 +1094,47 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                         }
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
+                    </div>
+                  </div>
+
+                  {/* Kitap Kapağı Görsel URL (cover_url) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                    <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                      Kitap Kapağı Görsel Adresi (cover_url)
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <input
+                          type="url"
+                          value={bookForm.cover_url || ''}
+                          onChange={(e) =>
+                            setBookForm({ ...bookForm, cover_url: e.target.value })
+                          }
+                          placeholder="https://covers.openlibrary.org/b/id/...-L.jpg"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      {bookForm.cover_url && (
+                        <div className="relative w-12 h-16 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0 shadow-2xs group">
+                          <img
+                            src={bookForm.cover_url}
+                            alt="Önizleme"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setBookForm({ ...bookForm, cover_url: '' })}
+                            title="Kapağı Kaldır"
+                            className="absolute inset-0 bg-slate-900/60 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 

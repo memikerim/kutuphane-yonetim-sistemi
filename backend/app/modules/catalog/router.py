@@ -17,6 +17,7 @@ from app.modules.catalog.schemas import (
     CategoryCreate,
     CategoryRead,
     CategoryUpdate,
+    IsbnLookupResponse,
     PaginatedBooksResponse,
     PublisherCreate,
     PublisherRead,
@@ -142,6 +143,20 @@ def get_books(
         sort_by=sortBy,
         sort_order=sortOrder,
     )
+
+
+@router.get(
+    "/books/lookup-isbn/{isbn}",
+    response_model=IsbnLookupResponse,
+    summary="ISBN ile otomatik kitap bilgisi sorgula ve eksikleri oluştur (ADMIN)",
+    description=(
+        "OpenLibrary ve Google Books API kullanarak ISBN sorgular. "
+        "Yazar, yayınevi veya kategoriler veritabanında henüz yoksa otomatik olarak oluşturur "
+        "ve frontend formunu doldurmaya hazır JSON döner."
+    ),
+)
+def lookup_isbn(isbn: str, db: DbSession, admin: AdminDep):
+    return handle_service_error(service.lookup_isbn_data, db, isbn)
 
 
 @router.get("/books/{id}", response_model=BookRead, summary="Kitap detay")

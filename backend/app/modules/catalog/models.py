@@ -80,6 +80,7 @@ class Book(UUIDPrimaryKeyMixin, Base):
     )
     published_year: Mapped[int | None] = mapped_column(SmallInteger)
     stock_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     publisher: Mapped[Publisher | None] = relationship(back_populates="books")
     authors: Mapped[list[Author]] = relationship(

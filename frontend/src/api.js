@@ -86,6 +86,8 @@ export const api = {
     return request(`/books${qs ? `?${qs}` : ''}`);
   },
   getBook: (id) => request(`/books/${id}`),
+  lookupIsbn: (isbn) =>
+    request(`/books/lookup-isbn/${encodeURIComponent(isbn)}`),
   createBook: (data) =>
     request('/books', { method: 'POST', body: JSON.stringify(data) }),
   updateBook: (id, data) =>
