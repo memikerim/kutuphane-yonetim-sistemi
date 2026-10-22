@@ -46,9 +46,18 @@ def borrow_book(data: BorrowingCreate, db: DbSession, current_user: CurrentUser)
 def return_book(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
     """
     Ödünç alınan kitabı iade eder.
-    Kayıt durumu RETURNED yapılır, iade tarihi atılır ve kitap stoku 1 artırılır.
+    Kayıt durumu RETURNED yapılır, iade tarihi atılır, gecikme varsa ceza hesaplanır ve kitap stoku 1 artırılır.
     """
     return handle_service_error(service.return_borrowing, db, current_user, id)
+
+
+@router.post("/borrowings/{id}/pay-penalty", response_model=BorrowingRead, summary="Gecikme cezasını öde")
+def pay_penalty(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
+    """
+    Kullanıcının ilgili ödünç işlemine ait gecikme cezasını ödediğini işaretler (is_penalty_paid = True).
+    """
+    return handle_service_error(service.pay_borrowing_penalty, db, current_user, id)
+
 
 
 # --- Reservation Endpoints ---

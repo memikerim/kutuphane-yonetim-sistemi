@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Enum, ForeignKey, Index, func, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.base_model import Base, UUIDPrimaryKeyMixin
@@ -58,9 +58,43 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
         default=BorrowingStatus.ACTIVE,
         server_default=BorrowingStatus.ACTIVE.value,
     )
+    penalty_amount: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    is_penalty_paid: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
-    user: Mapped["User"] = relationship(back_populates="borrowings")
-    book: Mapped["Book"] = relationship(back_populates="borrowings")
+    user: Mapped["User"] = relationship(back_populates="borrowings", lazy="selectin")
+    book: Mapped["Book"] = relationship(back_populates="borrowings", lazy="selectin")
+
+    @property
+    def overdue_days(self) -> int:
+        from app.core.config import settings
+
+        if self.status == BorrowingStatus.RETURNED:
+            if self.return_date and self.due_date and self.return_date > self.due_date:
+                return (self.return_date - self.due_date).days
+            if self.penalty_amount and self.penalty_amount > 0 and settings.DAILY_PENALTY_RATE > 0:
+                return int(round(self.penalty_amount / settings.DAILY_PENALTY_RATE))
+            return 0
+        today = date.today()
+        if self.due_date and today > self.due_date:
+            return (today - self.due_date).days
+        return 0
+
+    @property
+    def user_email(self) -> str | None:
+        return self.user.email if self.user else None
+
+    @property
+    def user_full_name(self) -> str | None:
+        return f"{self.user.first_name} {self.user.last_name}" if self.user else None
+
+    @property
+    def book_title(self) -> str | None:
+        return self.book.title if self.book else None
+
 
 
 class Reservation(UUIDPrimaryKeyMixin, Base):

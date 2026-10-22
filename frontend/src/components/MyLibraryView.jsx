@@ -10,6 +10,8 @@ import {
   AlertCircle,
   Trash2,
   Users,
+  Banknote,
+  AlertTriangle,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -32,6 +34,7 @@ export default function MyLibraryView({ notify, onSelectBook }) {
   const [bookMap, setBookMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [returningId, setReturningId] = useState(null);
+  const [payingPenaltyId, setPayingPenaltyId] = useState(null);
   const [borrowingResId, setBorrowingResId] = useState(null);
   const [cancellingResId, setCancellingResId] = useState(null);
   const [subTab, setSubTab] = useState('borrowings');
@@ -103,8 +106,15 @@ export default function MyLibraryView({ notify, onSelectBook }) {
   const handleReturnBook = async (borrowingId) => {
     setReturningId(borrowingId);
     try {
-      await api.returnBook(borrowingId);
-      notify('Kitap başarıyla iade edildi ve stok 1 artırıldı!', 'success');
+      const res = await api.returnBook(borrowingId);
+      if (res?.penalty_amount > 0 && !res?.is_penalty_paid) {
+        notify(
+          `Kitap gecikmeli olarak iade edildi! ${res.penalty_amount} TL gecikme cezası oluştu.`,
+          'error'
+        );
+      } else {
+        notify('Kitap başarıyla iade edildi ve stok 1 artırıldı!', 'success');
+      }
       await fetchAll();
     } catch (err) {
       notify(err.message || 'İade işlemi başarısız', 'error');
@@ -112,6 +122,20 @@ export default function MyLibraryView({ notify, onSelectBook }) {
       setReturningId(null);
     }
   };
+
+  const handlePayPenalty = async (borrowingId, amount) => {
+    setPayingPenaltyId(borrowingId);
+    try {
+      await api.payPenalty(borrowingId);
+      notify(`${amount} TL gecikme cezanız başarıyla ödendi!`, 'success');
+      await fetchAll();
+    } catch (err) {
+      notify(err.message || 'Ceza ödeme işlemi başarısız', 'error');
+    } finally {
+      setPayingPenaltyId(null);
+    }
+  };
+
 
   const handleBorrowReservedBook = async (res) => {
     setBorrowingResId(res.id);
@@ -150,11 +174,64 @@ export default function MyLibraryView({ notify, onSelectBook }) {
     }
   };
 
-  const activeBorrowingsCount = borrowings.filter((b) => b.status === 'ACTIVE').length;
+  const activeBorrowingsCount = borrowings.filter(
+    (b) => b.status === 'ACTIVE' || b.status === 'OVERDUE'
+  ).length;
   const pendingReservationsCount = reservations.filter((r) => r.status === 'PENDING').length;
+
+  const overdueActiveCount = borrowings.filter(
+    (b) => b.status !== 'RETURNED' && (b.status === 'OVERDUE' || (b.overdue_days || 0) > 0)
+  ).length;
+
+  const unpaidReturnedCount = borrowings.filter(
+    (b) => b.status === 'RETURNED' && (b.penalty_amount || 0) > 0 && !b.is_penalty_paid
+  ).length;
+
+  const totalActiveDebt = borrowings.reduce((sum, b) => {
+    if (b.status === 'RETURNED') {
+      if ((b.penalty_amount || 0) > 0 && !b.is_penalty_paid) {
+        return sum + Number(b.penalty_amount || 0);
+      }
+      return sum;
+    }
+    if (b.status === 'OVERDUE' || (b.overdue_days || 0) > 0) {
+      return sum + Number(b.penalty_amount || 0);
+    }
+    return sum;
+  }, 0);
 
   return (
     <div className="space-y-6">
+      {/* Overdue & Active Penalty Debt Alert Banner */}
+      {(totalActiveDebt > 0 || overdueActiveCount > 0) && (
+        <div className="bg-gradient-to-r from-rose-600 via-rose-700 to-red-800 text-white rounded-2xl p-5 sm:p-6 shadow-lg border border-rose-500 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-white/15 backdrop-blur-xs flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle className="w-6 h-6 text-amber-300" />
+            </div>
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-white/20 text-rose-100 mb-1.5">
+                GECİKME VE CEZA UYARISI (GÜNLÜK 10 TL)
+              </div>
+              <h2 className="text-lg sm:text-xl font-extrabold">
+                Toplam Aktif Gecikme Borcunuz: {totalActiveDebt.toFixed(2)} TL
+              </h2>
+              <p className="text-xs sm:text-sm text-rose-100 mt-1 leading-relaxed">
+                Ödenmemiş gecikme cezanız ({unpaidReturnedCount} adet) veya süresi geçmiş kitabınız ({overdueActiveCount} adet) bulunduğu için yeni kitap ödünç alamaz ve rezervasyon yapamazsınız. Lütfen geciken kitapları iade edin ve oluşan cezaları ödeyin.
+              </p>
+            </div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-xs border border-white/20 rounded-2xl px-4 py-3 text-center shrink-0">
+            <span className="block text-[11px] uppercase tracking-wider text-rose-200 font-bold">
+              Güncel Toplam Borç
+            </span>
+            <span className="text-2xl font-extrabold text-white">
+              {totalActiveDebt.toFixed(2)} TL
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -255,13 +332,23 @@ export default function MyLibraryView({ notify, onSelectBook }) {
             {borrowings.map((item) => {
               const book = bookMap[item.book_id];
               const isReturned = item.status === 'RETURNED';
+              const overdueDays = Number(item.overdue_days || 0);
+              const penaltyAmount = Number(item.penalty_amount || 0);
               const isOverdue =
-                !isReturned && new Date(item.due_date) < new Date(new Date().toDateString());
+                !isReturned &&
+                (item.status === 'OVERDUE' ||
+                  overdueDays > 0 ||
+                  new Date(item.due_date) < new Date(new Date().toDateString()));
+              const hasUnpaidPenalty = isReturned && penaltyAmount > 0 && !item.is_penalty_paid;
 
               return (
                 <div
                   key={item.id}
-                  className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-2xs flex flex-col justify-between gap-4 hover:border-indigo-200 transition-all"
+                  className={`bg-white rounded-2xl p-5 border shadow-2xs flex flex-col justify-between gap-4 transition-all ${
+                    isOverdue || hasUnpaidPenalty
+                      ? 'border-rose-300 ring-1 ring-rose-100'
+                      : 'border-slate-200/90 hover:border-indigo-200'
+                  }`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-2">
@@ -287,9 +374,9 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                           İade Edildi
                         </span>
                       ) : isOverdue ? (
-                        <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                        <span className="shrink-0 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-extrabold bg-rose-600 text-white shadow-xs">
                           <AlertCircle className="w-3.5 h-3.5" />
-                          Süresi Geçti
+                          GECİKMİŞ ({overdueDays} Gün)
                         </span>
                       ) : (
                         <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
@@ -307,10 +394,28 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                           {item.borrow_date}
                         </span>
                       </div>
-                      <div className="bg-slate-50 p-2.5 rounded-xl">
-                        <span className="text-slate-400 block text-[11px]">Son Teslim Tarihi</span>
-                        <span className="font-semibold text-slate-700 flex items-center gap-1 mt-0.5">
-                          <Calendar className="w-3.5 h-3.5 text-amber-500" />
+                      <div
+                        className={`p-2.5 rounded-xl ${
+                          isOverdue ? 'bg-rose-50 border border-rose-200' : 'bg-slate-50'
+                        }`}
+                      >
+                        <span
+                          className={`block text-[11px] ${
+                            isOverdue ? 'text-rose-600 font-bold' : 'text-slate-400'
+                          }`}
+                        >
+                          Son Teslim Tarihi
+                        </span>
+                        <span
+                          className={`font-semibold flex items-center gap-1 mt-0.5 ${
+                            isOverdue ? 'text-rose-800' : 'text-slate-700'
+                          }`}
+                        >
+                          <Calendar
+                            className={`w-3.5 h-3.5 ${
+                              isOverdue ? 'text-rose-600' : 'text-amber-500'
+                            }`}
+                          />
                           {item.due_date}
                         </span>
                       </div>
@@ -324,18 +429,88 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                         </div>
                       )}
                     </div>
+
+                    {/* Overdue / Penalty Info Banner inside Card */}
+                    {isOverdue && (
+                      <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center justify-between gap-2 text-xs">
+                        <div className="text-rose-800">
+                          <span className="font-bold block">
+                            Gecikme Süresi: {overdueDays} Gün (Günlük 10 TL)
+                          </span>
+                          <span className="text-[11px] text-rose-600">
+                            Kitabı iade ettiğinizde ceza tutarı hesabınıza yansıtılacaktır.
+                          </span>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-extrabold text-xs shrink-0">
+                          {penaltyAmount.toFixed(2)} TL
+                        </span>
+                      </div>
+                    )}
+
+                    {isReturned && penaltyAmount > 0 && (
+                      <div
+                        className={`rounded-xl p-3 border flex items-center justify-between gap-2 text-xs ${
+                          item.is_penalty_paid
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                            : 'bg-amber-50 border-amber-300 text-amber-950'
+                        }`}
+                      >
+                        <div>
+                          <span className="font-bold block">
+                            Gecikme Cezası: {penaltyAmount.toFixed(2)} TL ({overdueDays} Gün Gecikme)
+                          </span>
+                          <span className="text-[11px] opacity-80">
+                            {item.is_penalty_paid
+                              ? 'Bu gecikme cezası ödenmiştir.'
+                              : 'Yeni ödünç/rezervasyon yapabilmek için bu cezayı ödemelisiniz.'}
+                          </span>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${
+                            item.is_penalty_paid
+                              ? 'bg-emerald-200 text-emerald-900'
+                              : 'bg-rose-100 text-rose-800 border border-rose-300'
+                          }`}
+                        >
+                          {item.is_penalty_paid ? 'Ödendi' : 'Ödenmedi'}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  {!isReturned && (
-                    <div className="pt-2 flex justify-end">
-                      <button
-                        onClick={() => handleReturnBook(item.id)}
-                        disabled={returningId === item.id}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        {returningId === item.id ? 'İade Ediliyor...' : 'Kitabı İade Et'}
-                      </button>
+                  {(!isReturned || hasUnpaidPenalty) && (
+                    <div className="pt-2 flex flex-wrap justify-end gap-2">
+                      {!isReturned && (
+                        <button
+                          onClick={() => handleReturnBook(item.id)}
+                          disabled={returningId === item.id}
+                          className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-semibold shadow-xs transition-all cursor-pointer disabled:opacity-60 ${
+                            isOverdue
+                              ? 'bg-rose-600 hover:bg-rose-700'
+                              : 'bg-indigo-600 hover:bg-indigo-700'
+                          }`}
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          {returningId === item.id
+                            ? 'İade Ediliyor...'
+                            : isOverdue
+                            ? `Gecikmeli İade Et (${penaltyAmount.toFixed(0)} TL Ceza)`
+                            : 'Kitabı İade Et'}
+                        </button>
+                      )}
+
+                      {hasUnpaidPenalty && (
+                        <button
+                          onClick={() => handlePayPenalty(item.id, penaltyAmount)}
+                          disabled={payingPenaltyId === item.id}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                        >
+                          <Banknote className="w-4 h-4" />
+                          {payingPenaltyId === item.id
+                            ? 'Ödeniyor...'
+                            : `Cezayı Öde (${penaltyAmount.toFixed(2)} TL)`}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

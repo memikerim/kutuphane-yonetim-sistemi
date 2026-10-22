@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    DAILY_PENALTY_RATE: float = 10.0
+
+
     @property
     def DATABASE_URL(self) -> str:
         return (

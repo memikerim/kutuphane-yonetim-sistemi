@@ -13,6 +13,10 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  FastForward,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -24,6 +28,8 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const [authors, setAuthors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [publishers, setPublishers] = useState([]);
+  const [borrowings, setBorrowings] = useState([]);
+  const [simulatingId, setSimulatingId] = useState(null);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -55,22 +61,42 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const loadAllCatalogData = async () => {
     setLoading(true);
     try {
-      const [booksRes, authorsRes, categoriesRes, publishersRes] = await Promise.all([
-        api.getBooks({ page: 1, limit: 100 }),
-        api.getAuthors(),
-        api.getCategories(),
-        api.getPublishers(),
-      ]);
+      const [booksRes, authorsRes, categoriesRes, publishersRes, borrowingsRes] =
+        await Promise.all([
+          api.getBooks({ page: 1, limit: 100 }),
+          api.getAuthors(),
+          api.getCategories(),
+          api.getPublishers(),
+          api.getAdminBorrowings().catch(() => []),
+        ]);
       setBooks(booksRes?.items || []);
       setAuthors(authorsRes || []);
       setCategories(categoriesRes || []);
       setPublishers(publishersRes || []);
+      setBorrowings(borrowingsRes || []);
     } catch (err) {
       notify(err.message || 'Katalog verileri yüklenemedi', 'error');
     } finally {
       setLoading(false);
     }
   };
+
+  const handleSimulateOverdue = async (borrowingId) => {
+    setSimulatingId(borrowingId);
+    try {
+      const updated = await api.simulateOverdue(borrowingId);
+      notify(
+        `Gecikme simülasyonu uygulandı! Son teslim tarihi 5 gün geri çekildi (${updated.due_date}) ve durum OVERDUE (${updated.penalty_amount} TL) yapıldı.`,
+        'success'
+      );
+      await loadAllCatalogData();
+    } catch (err) {
+      notify(err.message || 'Gecikme simülasyonu başarısız', 'error');
+    } finally {
+      setSimulatingId(null);
+    }
+  };
+
 
   useEffect(() => {
     loadAllCatalogData();
@@ -481,31 +507,45 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
             <Building2 className="w-4 h-4" />
             Yayınevleri ({publishers.length})
           </button>
+
+          <button
+            onClick={() => setSubTab('borrowings')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              subTab === 'borrowings'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            Ödünç İşlemleri & Gecikme Simülasyonu ({borrowings.length})
+          </button>
         </div>
 
-        <button
-          onClick={() =>
-            openCreateModal(
-              subTab === 'books'
-                ? 'book'
-                : subTab === 'authors'
-                ? 'author'
-                : subTab === 'categories'
-                ? 'category'
-                : 'publisher'
-            )
-          }
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold shadow-sm shadow-indigo-200 transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          {subTab === 'books'
-            ? 'Yeni Kitap Ekle'
-            : subTab === 'authors'
-            ? 'Yeni Yazar Ekle'
-            : subTab === 'categories'
-            ? 'Yeni Kategori Ekle'
-            : 'Yeni Yayınevi Ekle'}
-        </button>
+        {subTab !== 'borrowings' && (
+          <button
+            onClick={() =>
+              openCreateModal(
+                subTab === 'books'
+                  ? 'book'
+                  : subTab === 'authors'
+                  ? 'author'
+                  : subTab === 'categories'
+                  ? 'category'
+                  : 'publisher'
+              )
+            }
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold shadow-sm shadow-indigo-200 transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            {subTab === 'books'
+              ? 'Yeni Kitap Ekle'
+              : subTab === 'authors'
+              ? 'Yeni Yazar Ekle'
+              : subTab === 'categories'
+              ? 'Yeni Kategori Ekle'
+              : 'Yeni Yayınevi Ekle'}
+          </button>
+        )}
       </div>
 
       {/* Responsive Tables (overflow-x-auto) */}
@@ -715,6 +755,140 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                       </td>
                     </tr>
                   ))
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {subTab === 'borrowings' && (
+            <table className="w-full text-left border-collapse min-w-[780px]">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <th className="py-3.5 px-4">Kullanıcı</th>
+                  <th className="py-3.5 px-4">Kitap</th>
+                  <th className="py-3.5 px-4">Ödünç / Son Teslim</th>
+                  <th className="py-3.5 px-4">Durum & Gecikme</th>
+                  <th className="py-3.5 px-4">Ceza Tutarı</th>
+                  <th className="py-3.5 px-4 text-right">Canlı Sunum Test İşlemi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {borrowings.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                      Henüz ödünç alma işlemi bulunmuyor.
+                    </td>
+                  </tr>
+                ) : (
+                  borrowings.map((item) => {
+                    const isReturned = item.status === 'RETURNED';
+                    const isOverdue = item.status === 'OVERDUE' || (item.overdue_days || 0) > 0;
+                    const penalty = Number(item.penalty_amount || 0);
+
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-slate-900">
+                            {item.user_full_name || 'Kullanıcı'}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {item.user_email || item.user_id}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-slate-800">
+                          {item.book_title ||
+                            books.find((b) => b.id === item.book_id)?.title ||
+                            item.book_id}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-600 space-y-0.5">
+                          <div>
+                            <span className="text-slate-400">Alış: </span>
+                            <span className="font-medium">{item.borrow_date}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Son Teslim: </span>
+                            <span
+                              className={`font-bold ${
+                                !isReturned && isOverdue ? 'text-rose-600' : 'text-slate-800'
+                              }`}
+                            >
+                              {item.due_date}
+                            </span>
+                          </div>
+                          {item.return_date && (
+                            <div>
+                              <span className="text-emerald-600">İade: </span>
+                              <span className="font-semibold text-emerald-700">
+                                {item.return_date}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {isReturned ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              RETURNED (İade Edildi)
+                            </span>
+                          ) : isOverdue ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-rose-600 text-white">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              OVERDUE ({item.overdue_days} Gün Gecikti)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              <Clock className="w-3.5 h-3.5" />
+                              ACTIVE
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {penalty > 0 ? (
+                            <div className="space-y-0.5">
+                              <span className="font-extrabold text-rose-700 text-xs block">
+                                {penalty.toFixed(2)} TL
+                              </span>
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                  item.is_penalty_paid
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : isReturned
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {item.is_penalty_paid
+                                  ? 'Ödendi'
+                                  : isReturned
+                                  ? 'Ödenmedi'
+                                  : 'Birikiyor (Aktif)'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">0.00 TL</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          {!isReturned ? (
+                            <button
+                              onClick={() => handleSimulateOverdue(item.id)}
+                              disabled={simulatingId === item.id}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                            >
+                              <FastForward className="w-3.5 h-3.5" />
+                              {simulatingId === item.id
+                                ? 'Simüle Ediliyor...'
+                                : 'Gecikme Simüle Et (-5 Gün)'}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">
+                              İade tamamlandı
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

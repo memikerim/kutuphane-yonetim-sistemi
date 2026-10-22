@@ -309,3 +309,79 @@ def test_reservation_24h_timer_starts_on_stock_and_expires_to_next_user(db_sessi
     assert user2_list[0].can_borrow_now is True
     assert user2_list[0].expires_at is not None
 
+
+def test_overdue_simulation_and_penalty_calculation_on_return(db_session, test_user, test_book):
+    """Gecikme simülasyonu (-5 gün) sonrası iade edildiğinde 5 * 10.0 = 50.0 TL ceza oluşmalı."""
+    borrowing = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(book_id=test_book.id, due_date=date.today() + timedelta(days=14)),
+    )
+
+    sim = service.simulate_overdue_borrowing(db_session, borrowing.id)
+    assert sim.status == BorrowingStatus.OVERDUE
+    assert sim.due_date == date.today() - timedelta(days=5)
+    assert sim.overdue_days == 5
+
+    returned = service.return_borrowing(db_session, test_user, borrowing.id)
+    assert returned.status == BorrowingStatus.RETURNED
+    assert returned.penalty_amount == 50.0
+    assert returned.is_penalty_paid is False
+
+
+def test_overdue_or_unpaid_penalty_blocks_new_borrowing_and_reservation(db_session, test_user, test_book):
+    """Gecikmiş kitabı veya ödenmemiş cezası olan kullanıcı yeni ödünç ve rezervasyon yapamaz; ödeyince açılır."""
+    from app.modules.catalog.models import Book
+
+    book2 = Book(
+        title="İkinci Kitap",
+        isbn="9789750509999",
+        published_year=2020,
+        stock_count=3,
+    )
+    db_session.add(book2)
+    db_session.commit()
+
+    b1 = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(book_id=test_book.id, due_date=date.today() + timedelta(days=7)),
+    )
+    service.simulate_overdue_borrowing(db_session, b1.id)
+
+    # 1. Aktif OVERDUE kitap varken yeni ödünç ve rezervasyon engellenmeli
+    with pytest.raises(service.BusinessRuleError) as exc_borrow:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(book_id=book2.id, due_date=date.today() + timedelta(days=7)),
+        )
+    assert "ödenmemiş gecikme cezanız veya süresi geçmiş kitabınız" in str(exc_borrow.value).lower()
+
+    with pytest.raises(service.BusinessRuleError) as exc_res:
+        service.create_reservation(db_session, test_user, ReservationCreate(book_id=book2.id))
+    assert "ödenmemiş gecikme cezanız veya süresi geçmiş kitabınız" in str(exc_res.value).lower()
+
+    # 2. Kitap iade edildiğinde 50 TL ödenmemiş ceza oluşur -> hala engellenmeli
+    service.return_borrowing(db_session, test_user, b1.id)
+
+    with pytest.raises(service.BusinessRuleError) as exc_unpaid:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(book_id=book2.id, due_date=date.today() + timedelta(days=7)),
+        )
+    assert "ödenmemiş gecikme cezanız" in str(exc_unpaid.value).lower()
+
+    # 3. Ceza ödendiğinde blokaj kalkmalı
+    paid = service.pay_borrowing_penalty(db_session, test_user, b1.id)
+    assert paid.is_penalty_paid is True
+
+    b2 = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(book_id=book2.id, due_date=date.today() + timedelta(days=7)),
+    )
+    assert b2.status == BorrowingStatus.ACTIVE
+
+

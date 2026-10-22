@@ -1,8 +1,12 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 import app.models  # noqa: F401  - tüm modelleri/ilişkileri mapper'a kaydeder
 from app.core.config import settings
+from app.core.database import engine
 from app.core.logging_config import setup_logging
 from app.modules.admin.router import router as admin_router
 from app.modules.auth.router import router as auth_router
@@ -12,6 +16,26 @@ from app.modules.review.router import router as review_router
 
 # Uygulama genelinde loglamayı başlat
 setup_logging()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        with engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
+                conn.execute(
+                    text("ALTER TABLE reservations ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL")
+                )
+                conn.execute(
+                    text("ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0")
+                )
+                conn.execute(
+                    text("ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_penalty_paid BOOLEAN NOT NULL DEFAULT FALSE")
+                )
+    except Exception:
+        pass
+    yield
+
 
 tags_metadata = [
     {
@@ -42,6 +66,7 @@ tags_metadata = [
 
 app = FastAPI(
     title=f"{settings.APP_NAME} API",
+    lifespan=lifespan,
     description="""
 ## Kütüphane Yönetim Sistemi API Dokümantasyonu
 

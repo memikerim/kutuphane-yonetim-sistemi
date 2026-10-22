@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.modules.auth.models import User
 from app.modules.borrowing.models import (
     Borrowing,
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 MAX_ACTIVE_BORROWINGS = 3
 RESERVATION_HOLD_HOURS = 24
+OVERDUE_OR_PENALTY_BLOCK_MSG = (
+    "Ödenmemiş gecikme cezanız veya süresi geçmiş kitabınız bulunduğu için yeni işlem yapamazsınız."
+)
 
 
 class BusinessRuleError(Exception):
@@ -30,6 +34,53 @@ class BusinessRuleError(Exception):
 
 class NotFoundError(Exception):
     pass
+
+
+def sync_overdue_borrowings(db: Session, user_id: uuid.UUID | None = None) -> None:
+    """Teslim tarihi (due_date) geçmiş ACTIVE ödünç kayıtlarının durumunu OVERDUE olarak günceller."""
+    today = date.today()
+    stmt = select(Borrowing).where(
+        Borrowing.status == BorrowingStatus.ACTIVE,
+        Borrowing.due_date < today,
+    )
+    if user_id is not None:
+        stmt = stmt.where(Borrowing.user_id == user_id)
+
+    overdue_items = list(db.scalars(stmt).all())
+    if overdue_items:
+        for b in overdue_items:
+            b.status = BorrowingStatus.OVERDUE
+        db.commit()
+
+
+def _check_user_overdue_or_unpaid_penalty(db: Session, user: User) -> None:
+    """
+    Kullanıcının süresi geçmiş aktif bir ödünç kitabı (OVERDUE) veya
+    ödenmemiş gecikme cezası (penalty_amount > 0 ve is_penalty_paid == False) varsa 400 fırlatır.
+    """
+    sync_overdue_borrowings(db, user.id)
+    today = date.today()
+
+    user_borrowings = list(
+        db.scalars(select(Borrowing).where(Borrowing.user_id == user.id)).all()
+    )
+    for b in user_borrowings:
+        is_overdue_active = b.status != BorrowingStatus.RETURNED and (
+            b.status == BorrowingStatus.OVERDUE or b.due_date < today
+        )
+        has_unpaid_penalty = (b.penalty_amount or 0.0) > 0 and not b.is_penalty_paid
+
+        if is_overdue_active or has_unpaid_penalty:
+            logger.warning(
+                "İşlem engellendi (Gecikmiş kitap veya ödenmemiş ceza mevcut) -> user_id: %s, borrow_id: %s, status: %s, penalty: %.2f, paid: %s",
+                user.id,
+                b.id,
+                b.status,
+                b.penalty_amount or 0.0,
+                b.is_penalty_paid,
+            )
+            raise BusinessRuleError(OVERDUE_OR_PENALTY_BLOCK_MSG)
+
 
 
 def sync_reservations(db: Session, book_id: uuid.UUID | None = None) -> None:
@@ -160,6 +211,9 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
     # Önce bu kitaba ait rezervasyon kuyruğunu ve süre aşımını senkronize et
     sync_reservations(db, book.id)
     db.refresh(book)
+
+    # Kural 0: Gecikmiş (OVERDUE) kitabı veya ödenmemiş cezası olan kullanıcı yeni kitap ödünç alamaz
+    _check_user_overdue_or_unpaid_penalty(db, user)
 
     # Kural 1: Kullanıcı aynı kitabı iade etmeden (ACTIVE/OVERDUE iken) ikinci kez ödünç alamaz
     existing_active_for_book = db.scalar(
@@ -312,8 +366,25 @@ def return_borrowing(db: Session, user: User, borrowing_id: uuid.UUID) -> Borrow
         )
         raise BusinessRuleError("Bu kitap zaten iade edilmiş")
 
+    today = date.today()
     borrowing.status = BorrowingStatus.RETURNED
-    borrowing.return_date = date.today()
+    borrowing.return_date = today
+
+    if today > borrowing.due_date:
+        overdue_days = (today - borrowing.due_date).days
+        penalty = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+        borrowing.penalty_amount = penalty
+        borrowing.is_penalty_paid = False
+        logger.warning(
+            "Gecikmeli iade: Ceza oluşturuldu -> borrow_id: %s, user_id: %s, overdue_days: %d, penalty_amount: %.2f TL",
+            borrowing.id,
+            user.id,
+            overdue_days,
+            penalty,
+        )
+    else:
+        borrowing.penalty_amount = 0.0
+        borrowing.is_penalty_paid = False
 
     # Stok iadesi (atomic update)
     book = db.get(Book, borrowing.book_id)
@@ -360,6 +431,9 @@ def create_reservation(db: Session, user: User, data: ReservationCreate) -> Rese
         raise NotFoundError("Kitap bulunamadı")
 
     sync_reservations(db, book.id)
+
+    # Gecikmiş (OVERDUE) kitabı veya ödenmemiş cezası olan kullanıcı rezervasyon yapamaz
+    _check_user_overdue_or_unpaid_penalty(db, user)
 
     # Kullanıcının zaten elinde aktif olarak bu kitap varsa rezerve edemez
     existing_active_borrowing = db.scalar(
@@ -444,8 +518,93 @@ def cancel_reservation(db: Session, user: User, reservation_id: uuid.UUID) -> No
     sync_reservations(db, book_id)
 
 
+def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> Borrowing:
+    """Kullanıcının ilgili ödünç işlemine ait gecikme cezasını ödediğini işaretler (is_penalty_paid = True)."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        logger.warning(
+            "Ceza ödeme başarısız: Ödünç kaydı bulunamadı -> borrow_id: %s, user_id: %s",
+            borrowing_id,
+            user.id,
+        )
+        raise NotFoundError("Ödünç alma kaydı bulunamadı")
+
+    if borrowing.user_id != user.id:
+        logger.warning(
+            "Ceza ödeme başarısız: Kayıt kullanıcıya ait değil -> borrow_id: %s, requester: %s, owner: %s",
+            borrowing_id,
+            user.id,
+            borrowing.user_id,
+        )
+        raise BusinessRuleError("Bu ödünç alma kaydı size ait değil")
+
+    if (borrowing.penalty_amount or 0.0) <= 0.0:
+        raise BusinessRuleError("Bu kayıt için ödenecek bir gecikme cezası bulunmamaktadır")
+
+    if borrowing.is_penalty_paid:
+        raise BusinessRuleError("Bu gecikme cezası zaten ödenmiş")
+
+    borrowing.is_penalty_paid = True
+    db.commit()
+    db.refresh(borrowing)
+    logger.info(
+        "Gecikme cezası başarıyla ödendi -> borrow_id: %s, user_id: %s, penalty_amount: %.2f TL",
+        borrowing.id,
+        user.id,
+        borrowing.penalty_amount,
+    )
+    return borrowing
+
+
+def simulate_overdue_borrowing(db: Session, borrowing_id: uuid.UUID) -> Borrowing:
+    """
+    Canlı sunum / test için seçilen aktif ödünç kaydının due_date değerini 5 gün öncesine çeker
+    ve durumunu OVERDUE yapar.
+    """
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç alma kaydı bulunamadı")
+
+    if borrowing.status == BorrowingStatus.RETURNED:
+        raise BusinessRuleError("İade edilmiş bir kayda gecikme simülasyonu uygulanamaz")
+
+    today = date.today()
+    # Eğer due_date bugün veya gelecekteyse doğrudan bugünden 5 gün öncesine çek; zaten geçmişteyse 5 gün daha geri çek
+    if borrowing.due_date >= today:
+        new_due_date = today - timedelta(days=5)
+    else:
+        new_due_date = borrowing.due_date - timedelta(days=5)
+
+    # CheckConstraint (due_date >= borrow_date) ihlalini önlemek için borrow_date'i de uyumlu çek
+    if borrowing.borrow_date > new_due_date:
+        borrowing.borrow_date = new_due_date - timedelta(days=14)
+
+    borrowing.due_date = new_due_date
+    borrowing.status = BorrowingStatus.OVERDUE
+
+    db.commit()
+    db.refresh(borrowing)
+    logger.info(
+        "Gecikme simülasyonu uygulandı (-5 gün) -> borrow_id: %s, user_id: %s, new_due_date: %s, status: %s",
+        borrowing.id,
+        borrowing.user_id,
+        borrowing.due_date,
+        borrowing.status,
+    )
+    return borrowing
+
+
+def get_all_borrowings(db: Session) -> Sequence[Borrowing]:
+    """Tüm ödünç işlemlerini (ADMIN paneli için) tarihe göre sıralı döner."""
+    sync_overdue_borrowings(db)
+    sync_reservations(db)
+    stmt = select(Borrowing).order_by(Borrowing.borrow_date.desc())
+    return db.scalars(stmt).all()
+
+
 def get_user_borrowings(db: Session, user: User) -> Sequence[Borrowing]:
     """Kullanıcının ödünç aldığı kitapları (aktif ve geçmiş) tarihe göre sıralı döner."""
+    sync_overdue_borrowings(db, user.id)
     sync_reservations(db)
     stmt = (
         select(Borrowing)
@@ -453,6 +612,7 @@ def get_user_borrowings(db: Session, user: User) -> Sequence[Borrowing]:
         .order_by(Borrowing.borrow_date.desc())
     )
     return db.scalars(stmt).all()
+
 
 
 def get_user_reservations(db: Session, user: User) -> Sequence[Reservation]:

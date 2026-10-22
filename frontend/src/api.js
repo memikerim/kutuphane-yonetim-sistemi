@@ -122,6 +122,14 @@ export const api = {
     request('/borrowings', { method: 'POST', body: JSON.stringify(data) }),
   returnBook: (id) =>
     request(`/borrowings/${id}/return`, { method: 'PATCH' }),
+  payPenalty: (id) =>
+    request(`/borrowings/${id}/pay-penalty`, { method: 'POST' }),
+
+  // Admin Borrowings & Overdue Simulation
+  getAdminBorrowings: () => request('/admin/borrowings'),
+  simulateOverdue: (id) =>
+    request(`/admin/borrowings/${id}/simulate-overdue`, { method: 'PATCH' }),
+
 
   // Reservations
   getMyReservations: () => request('/reservations'),
