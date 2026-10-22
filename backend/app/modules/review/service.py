@@ -24,6 +24,11 @@ BANNED_EXACT_WORDS = {
     "embesil",
     "ahmak",
     "mal",
+    "mallar",
+    "malsın",
+    "malsin",
+    "mallık",
+    "mallik",
     "angut",
     "dangalak",
     "beyinsiz",
@@ -33,12 +38,14 @@ BANNED_EXACT_WORDS = {
     "ahlaksiz",
     "haysiyetsiz",
     "karaktersiz",
+    "onursuz",
     "pislik",
     "rezil",
     "iğrenç",
     "igrenc",
     "lanet",
     "defol",
+    "defolun",
     "terbiyesiz",
     "edepsiz",
     "namussuz",
@@ -52,22 +59,53 @@ BANNED_EXACT_WORDS = {
     "okuz",
     "gerzek",
     "manyak",
+    "sik",
     "siktir",
     "sikik",
+    "hassiktir",
+    "hasiktir",
     "amk",
     "aq",
+    "mk",
+    "amq",
     "oç",
+    "oc",
     "orospu",
+    "oruspu",
     "piç",
     "pic",
+    "picler",
+    "piclik",
     "yavşak",
     "yavsak",
     "göt",
     "got",
+    "gotu",
+    "gotun",
+    "gotum",
+    "gotlek",
+    "gotveren",
+    "gotten",
+    "gotler",
     "bok",
     "boktan",
+    "boku",
+    "bokun",
+    "boklar",
+    "bokluk",
     "pezevenk",
     "kaltak",
+    "kahpe",
+    "fahişe",
+    "fahise",
+    "kevaşe",
+    "kevase",
+    "gavat",
+    "dalyarak",
+    "yarrak",
+    "yarak",
+    "amcık",
+    "amcik",
     "ibne",
     "puşt",
     "pust",
@@ -80,11 +118,116 @@ BANNED_EXACT_WORDS = {
     "stupid",
     "moron",
     "fuck",
+    "fucking",
+    "fucker",
     "shit",
     "bitch",
     "asshole",
     "bastard",
 }
+
+# Ek aldığında her durumda kötü söz/hakaret olan Türkçe kökler (yumuşamış halleri dahil)
+BANNED_UNCONDITIONAL_STEMS = (
+    "aptal",
+    "salak",
+    "salağ",
+    "salag",
+    "gerizekal",
+    "embesil",
+    "ahmak",
+    "ahmağ",
+    "ahmag",
+    "angut",
+    "dangalak",
+    "dangalağ",
+    "dangalag",
+    "beyinsiz",
+    "şerefsiz",
+    "serefsiz",
+    "ahlaksız",
+    "ahlaksiz",
+    "haysiyetsiz",
+    "karaktersiz",
+    "onursuz",
+    "terbiyesiz",
+    "edepsiz",
+    "namussuz",
+    "alçak",
+    "alçağ",
+    "alcak",
+    "pislik",
+    "pisliğ",
+    "pislig",
+    "rezil",
+    "iğrenç",
+    "igrenc",
+    "gerzek",
+    "manyak",
+    "manyağ",
+    "köpek",
+    "köpeğ",
+    "kopek",
+    "eşek",
+    "eşeğ",
+    "öküz",
+    "okuz",
+    "siktir",
+    "hassiktir",
+    "hasiktir",
+    "orospu",
+    "oruspu",
+    "pezevenk",
+    "pezeveng",
+    "yavşak",
+    "yavşağ",
+    "yavsak",
+    "yavsag",
+    "kaltak",
+    "kaltağ",
+    "kahpe",
+    "fahişe",
+    "fahise",
+    "kevaşe",
+    "kevase",
+    "gavat",
+    "dalyarak",
+    "yarrak",
+    "yarrağ",
+    "yarrag",
+    "yaraklar",
+    "yarağım",
+    "yarağın",
+    "yarağı",
+    "amcık",
+    "amcığ",
+    "amcik",
+    "amcig",
+    "amına",
+    "amina",
+    "amını",
+    "amini",
+    "ibne",
+    "puşt",
+    "pust",
+    "götlek",
+    "gotlek",
+    "götveren",
+    "gotveren",
+    "küfür",
+    "küfr",
+    "kufur",
+    "hakaret",
+)
+
+# Kökleri masum kelimelerle çakışabileceği için güvenli istisna (whitelist) ile kontrol edilen kökler:
+# - "sik*" -> sikke, siklet, siklon, siklamen, siklus, siklik hariç tüm çekimleri ("siktiklerim", "sikeyim", "sikerler", "sikim" vb.) yasaklıdır.
+# - "göt*" -> götür* (götürmek, götürü vb.) hariç tüm çekimleri ("götü", "götün", "götten", "götler" vb.) yasaklıdır.
+# - "bok*" -> boks* (boks, boksör vb.) ve bokeh hariç tüm çekimleri ("boktan", "boku", "boklar" vb.) yasaklıdır.
+# - "piç*" -> piçuta hariç tüm çekimleri ("piçler", "piçlik", "piçin" vb.) yasaklıdır.
+SAFE_SIK_PREFIXES = ("sikke", "siklet", "sikl")
+SAFE_GOT_PREFIXES = ("götür", "götur")
+SAFE_BOK_PREFIXES = ("boks", "bokeh")
+SAFE_PIC_PREFIXES = ("piçuta",)
 
 BANNED_PHRASES = [
     "geri zekalı",
@@ -95,11 +238,68 @@ BANNED_PHRASES = [
     "çöp kitap",
     "berbat ötesi",
     "berbat bir kitap",
+    "beş para etmez",
+    "bes para etmez",
+    "amına koy",
+    "amina koy",
+    "amına kod",
+    "amina kod",
+    "ananı sik",
+    "anani sik",
+    "siktir git",
+    "defol git",
+    "bok gibi",
+    "çöp gibi",
 ]
 
 
 def _normalize_tr(text: str) -> str:
     return text.replace("İ", "i").replace("I", "ı").lower().strip()
+
+
+def _collapse_repeats(word: str) -> str:
+    """Ardışık tekrarlanan harfleri tek harfe indirir (örn. 'siiiiiktiklerim' -> 'siktiklerim')."""
+    return re.sub(r"(.)\1+", r"\1", word)
+
+
+def _deobfuscate(text: str) -> str:
+    """Nokta/tire veya rakamlarla gizlenmiş kelimeleri çözer (örn. 's.i.k' -> 'sik', 's1kt1r' -> 'siktir')."""
+    leet_map = str.maketrans({"1": "i", "0": "o", "3": "e", "4": "a", "5": "s", "@": "a", "$": "s"})
+    cleaned = text.translate(leet_map)
+    # Harfler arasına konulan nokta, yıldız veya tireleri kaldır (örn: s.i.k.t.i.r -> siktir)
+    cleaned = re.sub(r"(?<=\w)[\.\*\-_]+(?=\w)", "", cleaned)
+    return cleaned
+
+
+def _check_single_token(token: str) -> bool:
+    """Tek bir kelimenin (veya tekrarları/gizlemesi çözülmüş halinin) yasaklı olup olmadığını denetler."""
+    if not token:
+        return False
+
+    if token in BANNED_EXACT_WORDS:
+        return True
+
+    for stem in BANNED_UNCONDITIONAL_STEMS:
+        if token.startswith(stem):
+            return True
+
+    # "sik-" kökü ve tüm Türkçe çekimli/ekli halleri ("siktiklerim", "sikeyim", "sikerim", "sikim", "sikilmiş" vb.)
+    if token.startswith("sik") and not token.startswith(SAFE_SIK_PREFIXES):
+        return True
+
+    # "göt-" kökü ve çekimli halleri ("götürmek" türevleri hariç)
+    if token.startswith("göt") and not token.startswith(SAFE_GOT_PREFIXES):
+        return True
+
+    # "bok-" kökü ve çekimli halleri ("boks", "boksör" vb. hariç)
+    if token.startswith("bok") and not token.startswith(SAFE_BOK_PREFIXES):
+        return True
+
+    # "piç-" kökü ve çekimli halleri
+    if token.startswith("piç") and not token.startswith(SAFE_PIC_PREFIXES):
+        return True
+
+    return False
 
 
 def find_inappropriate_expression(comment: str | None) -> str | None:
@@ -108,35 +308,22 @@ def find_inappropriate_expression(comment: str | None) -> str | None:
         return None
 
     normalized = _normalize_tr(comment)
+    deobfuscated = _deobfuscate(normalized)
 
     for phrase in BANNED_PHRASES:
-        if phrase in normalized:
+        if phrase in normalized or phrase in deobfuscated:
             return phrase
 
-    tokens = re.findall(r"\w+", normalized)
-    for token in tokens:
-        if token in BANNED_EXACT_WORDS:
+    # Hem normal metindeki kelimeleri hem de gizlemesi çözülmüş kelimeleri kontrol et
+    raw_tokens = re.findall(r"\w+", normalized)
+    deob_tokens = re.findall(r"\w+", deobfuscated)
+
+    for token in raw_tokens + deob_tokens:
+        if _check_single_token(token):
             return token
-        # Ek almış yaygın hakaret kökleri kontrolü
-        for stem in (
-            "aptal",
-            "salak",
-            "gerizekalı",
-            "gerizekali",
-            "şerefsiz",
-            "serefsiz",
-            "ahlaksız",
-            "terbiyesiz",
-            "beyinsiz",
-            "karaktersiz",
-            "siktir",
-            "orospu",
-            "pezevenk",
-            "küfür",
-            "hakaret",
-        ):
-            if token.startswith(stem):
-                return token
+        collapsed = _collapse_repeats(token)
+        if collapsed != token and _check_single_token(collapsed):
+            return token
 
     return None
 

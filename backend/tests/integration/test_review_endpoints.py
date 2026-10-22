@@ -54,6 +54,21 @@ def test_create_review_profanity_filter_rejected(client, auth_headers, test_book
     detail_phrase = resp_phrase.json()["detail"]
     assert "yorumunuz eklenemedi" in detail_phrase.lower()
 
+    # Ek almış / çekimlenmiş ve harf tekrarı içeren küfürlerin yakalanması
+    for inflected_comment in (
+        "siktiklerim kötü yapmış",
+        "siiiiiktiklerim böyle işi",
+        "s.i.k.t.i.r git",
+        "salağın teki yazmış",
+    ):
+        resp_inflected = client.post(
+            "/api/v1/reviews",
+            json={"book_id": str(test_book.id), "rating": 1, "comment": inflected_comment},
+            headers=auth_headers,
+        )
+        assert resp_inflected.status_code == 400
+        assert "yorumunuz eklenemedi" in resp_inflected.json()["detail"].lower()
+
 
 def test_create_review_success(client, auth_headers, test_book):
     _borrow_book_for_user(client, auth_headers, test_book.id)
