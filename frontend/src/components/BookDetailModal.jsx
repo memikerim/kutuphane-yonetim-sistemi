@@ -13,6 +13,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Hash,
+  Trash2,
+  ShieldAlert,
+  User,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -27,6 +30,7 @@ export default function BookDetailModal({
   const [book, setBook] = useState(initialBook);
   const [reviews, setReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(true);
+  const [hasBorrowedBook, setHasBorrowedBook] = useState(false);
 
   // Default due_date = today + 14 days
   const getDefaultDueDate = () => {
@@ -44,16 +48,30 @@ export default function BookDetailModal({
   const [hoverRating, setHoverRating] = useState(0);
   const [comment, setComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState(null);
+  const [deletingReviewId, setDeletingReviewId] = useState(null);
+
+  const isAdmin = Boolean(user?.roles?.includes('ADMIN'));
 
   const loadBookAndReviews = async () => {
     setLoadingReviews(true);
     try {
-      const [freshBook, bookReviews] = await Promise.all([
+      const promises = [
         api.getBook(initialBook.id),
         api.getReviews(initialBook.id),
-      ]);
+      ];
+      if (user) {
+        promises.push(api.getMyBorrowings().catch(() => []));
+      }
+      const [freshBook, bookReviews, myBorrowings] = await Promise.all(promises);
       setBook(freshBook);
       setReviews(bookReviews || []);
+      if (user && Array.isArray(myBorrowings)) {
+        const borrowed = myBorrowings.some((b) => b.book_id === initialBook.id);
+        setHasBorrowedBook(borrowed);
+      } else {
+        setHasBorrowedBook(false);
+      }
     } catch (err) {
       notify(err.message || 'Kitap detayları yüklenemedi', 'error');
     } finally {
@@ -63,7 +81,7 @@ export default function BookDetailModal({
 
   useEffect(() => {
     loadBookAndReviews();
-  }, [initialBook.id]);
+  }, [initialBook.id, user?.id]);
 
   const handleBorrow = async () => {
     if (!user) {
@@ -117,6 +135,8 @@ export default function BookDetailModal({
 
   const handleReviewSubmit = async (e) => {
     e.preventDefault();
+    setReviewError(null);
+
     if (!user) {
       notify('Değerlendirme yapmak için lütfen giriş yapın.', 'info');
       onClose();
@@ -134,12 +154,30 @@ export default function BookDetailModal({
       notify('Değerlendirmeniz başarıyla kaydedildi!', 'success');
       setComment('');
       setRating(5);
+      setReviewError(null);
       const updatedReviews = await api.getReviews(book.id);
       setReviews(updatedReviews || []);
     } catch (err) {
-      notify(err.message || 'Değerlendirme gönderilemedi', 'error');
+      const msg = err.message || 'Yorumunuz eklenemedi.';
+      setReviewError(msg);
+      notify(msg, 'error');
     } finally {
       setSubmittingReview(false);
+    }
+  };
+
+  const handleDeleteReview = async (reviewId) => {
+    setDeletingReviewId(reviewId);
+    setReviewError(null);
+    try {
+      await api.deleteReview(reviewId);
+      notify('Yorum başarıyla silindi.', 'success');
+      const updatedReviews = await api.getReviews(book.id);
+      setReviews(updatedReviews || []);
+    } catch (err) {
+      notify(err.message || 'Yorum silinemedi.', 'error');
+    } finally {
+      setDeletingReviewId(null);
     }
   };
 
@@ -473,14 +511,42 @@ export default function BookDetailModal({
                 </div>
               </div>
 
+              {user && !hasBorrowedBook && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    Bu kitaba değerlendirme ve yorum bırakabilmek için kitabı daha önce ödünç almış olmanız gerekmektedir.
+                  </span>
+                </div>
+              )}
+
+              {reviewError && (
+                <div className="flex items-start justify-between gap-2.5 px-3.5 py-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs font-semibold shadow-2xs">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{reviewError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReviewError(null)}
+                    className="text-rose-500 hover:text-rose-700 shrink-0"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row gap-2.5">
                 <textarea
                   rows={2}
                   value={comment}
-                  onChange={(e) => setComment(e.target.value)}
+                  onChange={(e) => {
+                    setComment(e.target.value);
+                    if (reviewError) setReviewError(null);
+                  }}
                   placeholder={
                     user
-                      ? 'Kitap hakkındaki düşüncelerinizi yazın (opsiyonel)...'
+                      ? 'Kitap hakkındaki düşüncelerinizi yazın (opsiyonel, argo/kötü söz içeremez)...'
                       : 'Yorum yapmak için giriş yapmanız gerekmektedir...'
                   }
                   className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -507,42 +573,80 @@ export default function BookDetailModal({
               </div>
             ) : (
               <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-                {reviews.map((rev) => (
-                  <div
-                    key={rev.id}
-                    className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1">
-                        {[1, 2, 3, 4, 5].map((s) => (
-                          <Star
-                            key={s}
-                            className={`w-3.5 h-3.5 ${
-                              s <= rev.rating
-                                ? 'text-amber-400 fill-amber-400'
-                                : 'text-slate-200'
-                            }`}
-                          />
-                        ))}
-                        <span className="ml-1.5 text-xs font-bold text-slate-700">
-                          {rev.rating}/5
-                        </span>
+                {reviews.map((rev) => {
+                  const isOwnReview = Boolean(user && user.id === rev.user_id);
+                  const canDelete = Boolean(isOwnReview || isAdmin);
+                  return (
+                    <div
+                      key={rev.id}
+                      className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-800">
+                            <User className="w-3.5 h-3.5 text-indigo-600" />
+                            {rev.user_full_name || 'Okuyucu'}
+                          </span>
+                          {isOwnReview && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              Sizin Yorumunuz
+                            </span>
+                          )}
+                          <div className="flex items-center gap-0.5 ml-1">
+                            {[1, 2, 3, 4, 5].map((s) => (
+                              <Star
+                                key={s}
+                                className={`w-3.5 h-3.5 ${
+                                  s <= rev.rating
+                                    ? 'text-amber-400 fill-amber-400'
+                                    : 'text-slate-200'
+                                }`}
+                              />
+                            ))}
+                            <span className="ml-1 text-xs font-bold text-slate-700">
+                              {rev.rating}/5
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-400">
+                            {new Date(rev.created_at).toLocaleDateString('tr-TR', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteReview(rev.id)}
+                              disabled={deletingReviewId === rev.id}
+                              title={
+                                isOwnReview
+                                  ? 'Kendi yorumunuzu silin'
+                                  : 'Yönetici yetkisiyle bu yorumu silin'
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors disabled:opacity-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              {deletingReviewId === rev.id
+                                ? 'Siliniyor...'
+                                : isOwnReview
+                                ? 'Yorumu Sil'
+                                : 'Yorumu Sil (Admin)'}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-[11px] text-slate-400">
-                        {new Date(rev.created_at).toLocaleDateString('tr-TR', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
+                      {rev.comment && (
+                        <p className="text-xs text-slate-600 leading-relaxed">{rev.comment}</p>
+                      )}
                     </div>
-                    {rev.comment && (
-                      <p className="text-xs text-slate-600 leading-relaxed">{rev.comment}</p>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

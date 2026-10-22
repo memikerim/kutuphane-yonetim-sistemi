@@ -144,5 +144,7 @@ export const api = {
     request(`/reviews${bookId ? `?book_id=${bookId}` : ''}`),
   createReview: (data) =>
     request('/reviews', { method: 'POST', body: JSON.stringify(data) }),
+  deleteReview: (id) =>
+    request(`/reviews/${id}`, { method: 'DELETE' }),
 };
 

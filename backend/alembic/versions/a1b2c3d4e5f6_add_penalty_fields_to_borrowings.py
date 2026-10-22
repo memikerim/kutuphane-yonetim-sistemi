@@ -31,3 +31,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column('borrowings', 'is_penalty_paid')
     op.drop_column('borrowings', 'penalty_amount')
+

@@ -29,6 +29,11 @@ class Review(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
 
-    user: Mapped["User"] = relationship(back_populates="reviews")
+    user: Mapped["User"] = relationship(back_populates="reviews", lazy="selectin")
     book: Mapped["Book"] = relationship(back_populates="reviews")
+
+    @property
+    def user_full_name(self) -> str | None:
+        return f"{self.user.first_name} {self.user.last_name}" if self.user else None
+
 

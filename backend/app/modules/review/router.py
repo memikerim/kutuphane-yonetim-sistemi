@@ -19,6 +19,11 @@ def handle_service_error(func, *args, **kwargs):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         ) from e
+    except service.PermissionDeniedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        ) from e
     except service.DuplicateReviewError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -72,3 +77,18 @@ def get_reviews(
     ),
 ):
     return service.get_reviews(db, book_id=book_id)
+
+
+@router.delete(
+    "/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Yorumu sil (Yorum sahibi veya ADMIN)",
+    description=(
+        "Kullanıcı kendi yaptığı değerlendirmeyi silebilir. "
+        "ADMIN rolüne sahip yöneticiler ise herhangi bir kullanıcının yorumunu silebilir."
+    ),
+)
+def delete_review(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
+    handle_service_error(service.delete_review, db, current_user, id)
+    return None
+

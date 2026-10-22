@@ -27,6 +27,7 @@ class ReviewCreate(BaseModel):
 class ReviewRead(BaseModel):
     id: uuid.UUID = Field(..., description="Yorumun benzersiz kimliği")
     user_id: uuid.UUID = Field(..., description="Yorumu yapan kullanıcının kimliği")
+    user_full_name: str | None = Field(None, description="Yorumu yapan kullanıcının adı soyadı")
     book_id: uuid.UUID = Field(..., description="Kitabın benzersiz kimliği")
     rating: int = Field(..., ge=1, le=5, description="Verilen puan (1-5)")
     comment: str | None = Field(None, description="Yorum metni")
