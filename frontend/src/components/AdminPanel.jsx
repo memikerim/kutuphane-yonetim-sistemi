@@ -11,6 +11,8 @@ import {
   X,
   Check,
   RefreshCw,
+  Search,
+  Sparkles,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -28,6 +30,12 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const [modalType, setModalType] = useState('book'); // 'book' | 'author' | 'category' | 'publisher'
   const [editingItem, setEditingItem] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // Inline search & create states inside Book Modal
+  const [publisherQuery, setPublisherQuery] = useState('');
+  const [authorQuery, setAuthorQuery] = useState('');
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [inlineCreating, setInlineCreating] = useState(false);
 
   // Forms
   const [bookForm, setBookForm] = useState({
@@ -72,6 +80,10 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const openCreateModal = (type) => {
     setEditingItem(null);
     setModalType(type);
+    setPublisherQuery('');
+    setAuthorQuery('');
+    setCategoryQuery('');
+
     if (type === 'book') {
       setBookForm({
         title: '',
@@ -95,6 +107,10 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const openEditModal = (type, item) => {
     setEditingItem(item);
     setModalType(type);
+    setPublisherQuery('');
+    setAuthorQuery('');
+    setCategoryQuery('');
+
     if (type === 'book') {
       setBookForm({
         title: item.title || '',
@@ -122,19 +138,167 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     return list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
   };
 
+  // Yardımcı: Tam adı (Örn: "Ahmet Hamdi Tanpınar") ad ve soyad olarak ayırır
+  const splitFullName = (fullName) => {
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) {
+      return { first_name: parts[0], last_name: '-' };
+    }
+    const last_name = parts.pop();
+    const first_name = parts.join(' ');
+    return { first_name, last_name };
+  };
+
+  // Kitap modalı içinden anında yeni Yayınevi oluştur ve seç
+  const handleQuickCreatePublisher = async (rawName) => {
+    const name = rawName.trim();
+    if (!name) return null;
+
+    // Zaten varsa mevcut olanı seç
+    const existing = publishers.find(
+      (p) => p.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existing) {
+      setBookForm((prev) => ({ ...prev, publisher_id: existing.id }));
+      setPublisherQuery('');
+      return existing.id;
+    }
+
+    setInlineCreating(true);
+    try {
+      const created = await api.createPublisher({ name, contact_info: null });
+      setPublishers((prev) => [...prev, created]);
+      setBookForm((prev) => ({ ...prev, publisher_id: created.id }));
+      setPublisherQuery('');
+      notify(`"${created.name}" yayınevleri arasına eklendi ve seçildi!`, 'success');
+      if (onCatalogChanged) onCatalogChanged();
+      return created.id;
+    } catch (err) {
+      notify(err.message || 'Yayınevi oluşturulamadı', 'error');
+      return null;
+    } finally {
+      setInlineCreating(false);
+    }
+  };
+
+  // Kitap modalı içinden anında yeni Yazar oluştur ve seç
+  const handleQuickCreateAuthor = async (rawFullName) => {
+    const cleaned = rawFullName.trim();
+    if (!cleaned) return null;
+
+    // Zaten varsa mevcut olanı seç
+    const existing = authors.find(
+      (a) => `${a.first_name} ${a.last_name}`.toLowerCase() === cleaned.toLowerCase()
+    );
+    if (existing) {
+      setBookForm((prev) => ({
+        ...prev,
+        author_ids: prev.author_ids.includes(existing.id)
+          ? prev.author_ids
+          : [...prev.author_ids, existing.id],
+      }));
+      setAuthorQuery('');
+      return existing.id;
+    }
+
+    setInlineCreating(true);
+    try {
+      const { first_name, last_name } = splitFullName(cleaned);
+      const created = await api.createAuthor({ first_name, last_name });
+      setAuthors((prev) => [...prev, created]);
+      setBookForm((prev) => ({
+        ...prev,
+        author_ids: [...prev.author_ids, created.id],
+      }));
+      setAuthorQuery('');
+      notify(
+        `"${created.first_name} ${created.last_name}" yazarlar arasına eklendi ve seçildi!`,
+        'success'
+      );
+      if (onCatalogChanged) onCatalogChanged();
+      return created.id;
+    } catch (err) {
+      notify(err.message || 'Yazar oluşturulamadı', 'error');
+      return null;
+    } finally {
+      setInlineCreating(false);
+    }
+  };
+
+  // Kitap modalı içinden anında yeni Kategori oluştur ve seç
+  const handleQuickCreateCategory = async (rawName) => {
+    const name = rawName.trim();
+    if (!name) return null;
+
+    const existing = categories.find(
+      (c) => c.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existing) {
+      setBookForm((prev) => ({
+        ...prev,
+        category_ids: prev.category_ids.includes(existing.id)
+          ? prev.category_ids
+          : [...prev.category_ids, existing.id],
+      }));
+      setCategoryQuery('');
+      return existing.id;
+    }
+
+    setInlineCreating(true);
+    try {
+      const created = await api.createCategory({ name });
+      setCategories((prev) => [...prev, created]);
+      setBookForm((prev) => ({
+        ...prev,
+        category_ids: [...prev.category_ids, created.id],
+      }));
+      setCategoryQuery('');
+      notify(`"${created.name}" kategoriler arasına eklendi ve seçildi!`, 'success');
+      if (onCatalogChanged) onCatalogChanged();
+      return created.id;
+    } catch (err) {
+      notify(err.message || 'Kategori oluşturulamadı', 'error');
+      return null;
+    } finally {
+      setInlineCreating(false);
+    }
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
       if (modalType === 'book') {
+        let finalPublisherId = bookForm.publisher_id || null;
+        let finalAuthorIds = [...bookForm.author_ids];
+        let finalCategoryIds = [...bookForm.category_ids];
+
+        // Kullanıcı arama kutularına yeni bir isim yazıp '+' butonuna basmadan direkt Kaydet'e bastıysa otomatik oluştur!
+        if (publisherQuery.trim()) {
+          const newPubId = await handleQuickCreatePublisher(publisherQuery);
+          if (newPubId) finalPublisherId = newPubId;
+        }
+        if (authorQuery.trim()) {
+          const newAuthId = await handleQuickCreateAuthor(authorQuery);
+          if (newAuthId && !finalAuthorIds.includes(newAuthId)) {
+            finalAuthorIds.push(newAuthId);
+          }
+        }
+        if (categoryQuery.trim()) {
+          const newCatId = await handleQuickCreateCategory(categoryQuery);
+          if (newCatId && !finalCategoryIds.includes(newCatId)) {
+            finalCategoryIds.push(newCatId);
+          }
+        }
+
         const payload = {
           title: bookForm.title.trim(),
           isbn: bookForm.isbn.trim(),
           published_year: bookForm.published_year ? Number(bookForm.published_year) : null,
           stock_count: Number(bookForm.stock_count),
-          publisher_id: bookForm.publisher_id || null,
-          author_ids: bookForm.author_ids,
-          category_ids: bookForm.category_ids,
+          publisher_id: finalPublisherId,
+          author_ids: finalAuthorIds,
+          category_ids: finalCategoryIds,
         };
         if (editingItem) {
           await api.updateBook(editingItem.id, payload);
@@ -214,6 +378,33 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     }
   };
 
+  // Filtered lists for Book Modal
+  const filteredPublishers = publishers.filter((p) =>
+    p.name.toLowerCase().includes(publisherQuery.trim().toLowerCase())
+  );
+  const exactPublisherExists = publishers.some(
+    (p) => p.name.toLowerCase() === publisherQuery.trim().toLowerCase()
+  );
+  const selectedPublisherObj = publishers.find((p) => p.id === bookForm.publisher_id);
+
+  const filteredAuthors = authors.filter((a) =>
+    `${a.first_name} ${a.last_name}`
+      .toLowerCase()
+      .includes(authorQuery.trim().toLowerCase())
+  );
+  const exactAuthorExists = authors.some(
+    (a) =>
+      `${a.first_name} ${a.last_name}`.toLowerCase() ===
+      authorQuery.trim().toLowerCase()
+  );
+
+  const filteredCategories = categories.filter((c) =>
+    c.name.toLowerCase().includes(categoryQuery.trim().toLowerCase())
+  );
+  const exactCategoryExists = categories.some(
+    (c) => c.name.toLowerCase() === categoryQuery.trim().toLowerCase()
+  );
+
   return (
     <div className="space-y-6">
       {/* Admin Header Banner */}
@@ -227,7 +418,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
             Katalog ve Envanter Yönetim Paneli
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Kitap, Yazar, Kategori ve Yayınevi kayıtlarını çoklu ilişki desteğiyle ekleyebilir, düzenleyebilir ve silebilirsiniz.
+            Kitap eklerken mevcut Yazar, Kategori ve Yayınevlerini arayarak seçebilir; listede yoksa adını yazarak anında oluşturabilirsiniz.
           </p>
         </div>
 
@@ -534,8 +725,8 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
       {/* Create / Edit Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden my-auto">
-            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
               <h3 className="font-bold text-slate-900">
                 {editingItem ? 'Kaydı Düzenle' : 'Yeni Kayıt Oluştur'} (
                 {modalType === 'book'
@@ -567,7 +758,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                       required
                       value={bookForm.title}
                       onChange={(e) => setBookForm({ ...bookForm, title: e.target.value })}
-                      placeholder="Örn: Suç ve Ceza"
+                      placeholder="Örn: Tutunamayanlar"
                       className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
@@ -620,100 +811,283 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Yayınevi Seçimi
-                    </label>
-                    <select
-                      value={bookForm.publisher_id}
-                      onChange={(e) =>
-                        setBookForm({ ...bookForm, publisher_id: e.target.value })
-                      }
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="">-- Yayınevi Seçin (Opsiyonel) --</option>
-                      {publishers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
+                  {/* 1. AKILLI YAYINEVİ SEÇİMİ (ARA VEYA YOKSA EKLE) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                        Yayınevi (Mevcuttan Seç veya Yeni Yaz)
+                      </label>
+                      {selectedPublisherObj && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          Seçili: {selectedPublisherObj.name}
+                          <button
+                            type="button"
+                            onClick={() => setBookForm({ ...bookForm, publisher_id: '' })}
+                            className="hover:text-rose-600 ml-1"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="relative flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={publisherQuery}
+                          onChange={(e) => setPublisherQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && publisherQuery.trim()) {
+                              e.preventDefault();
+                              handleQuickCreatePublisher(publisherQuery);
+                            }
+                          }}
+                          placeholder="Yayınevi ara veya listede yoksa yeni adını yazın..."
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {publisherQuery.trim() && !exactPublisherExists && (
+                        <button
+                          type="button"
+                          disabled={inlineCreating}
+                          onClick={() => handleQuickCreatePublisher(publisherQuery)}
+                          className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          "{publisherQuery.trim()}" Ekle & Seç
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                      {filteredPublishers.map((p) => {
+                        const isSelected = bookForm.publisher_id === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() =>
+                              setBookForm({
+                                ...bookForm,
+                                publisher_id: isSelected ? '' : p.id,
+                              })
+                            }
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {isSelected && <Check className="w-3 h-3" />}
+                            {p.name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* Multi-select Authors */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      Yazarlar (Çoklu Seçim - BookAuthors)
-                    </label>
-                    {authors.length === 0 ? (
-                      <p className="text-xs text-slate-400">
-                        Önce "Yazarlar" sekmesinden yazar ekleyebilirsiniz.
-                      </p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                        {authors.map((a) => {
-                          const selected = bookForm.author_ids.includes(a.id);
+                  {/* 2. AKILLI YAZAR SEÇİMİ (ÇOKLU SEÇİM + ARA VEYA YOKSA EKLE) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-indigo-600" />
+                        Yazarlar (Çoklu Seçim — Ara veya Yeni Yazar Ekle)
+                      </label>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        {bookForm.author_ids.length} yazar seçili
+                      </span>
+                    </div>
+
+                    {/* Seçili Yazarlar Rozetleri */}
+                    {bookForm.author_ids.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pb-1">
+                        {bookForm.author_ids.map((id) => {
+                          const a = authors.find((item) => item.id === id);
+                          if (!a) return null;
                           return (
-                            <button
-                              key={a.id}
-                              type="button"
-                              onClick={() =>
-                                setBookForm({
-                                  ...bookForm,
-                                  author_ids: toggleSelection(bookForm.author_ids, a.id),
-                                })
-                              }
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                                selected
-                                  ? 'bg-indigo-600 text-white shadow-2xs'
-                                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                              }`}
+                            <span
+                              key={id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200"
                             >
-                              {selected && <Check className="w-3 h-3" />}
                               {a.first_name} {a.last_name}
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setBookForm({
+                                    ...bookForm,
+                                    author_ids: toggleSelection(bookForm.author_ids, id),
+                                  })
+                                }
+                                className="hover:text-rose-600 ml-0.5"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
                           );
                         })}
                       </div>
                     )}
+
+                    <div className="relative flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={authorQuery}
+                          onChange={(e) => setAuthorQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && authorQuery.trim()) {
+                              e.preventDefault();
+                              handleQuickCreateAuthor(authorQuery);
+                            }
+                          }}
+                          placeholder="Yazar ara veya listede yoksa 'Ad Soyad' yazıp ekleyin..."
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {authorQuery.trim() && !exactAuthorExists && (
+                        <button
+                          type="button"
+                          disabled={inlineCreating}
+                          onClick={() => handleQuickCreateAuthor(authorQuery)}
+                          className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          "{authorQuery.trim()}" Ekle & Seç
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pt-1">
+                      {filteredAuthors.map((a) => {
+                        const selected = bookForm.author_ids.includes(a.id);
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() =>
+                              setBookForm({
+                                ...bookForm,
+                                author_ids: toggleSelection(bookForm.author_ids, a.id),
+                              })
+                            }
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                              selected
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {selected && <Check className="w-3 h-3" />}
+                            {a.first_name} {a.last_name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* Multi-select Categories */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      Kategoriler (Çoklu Seçim - BookCategories)
-                    </label>
-                    {categories.length === 0 ? (
-                      <p className="text-xs text-slate-400">
-                        Önce "Kategoriler" sekmesinden kategori ekleyebilirsiniz.
-                      </p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                        {categories.map((c) => {
-                          const selected = bookForm.category_ids.includes(c.id);
+                  {/* 3. AKILLI KATEGORİ SEÇİMİ (ÇOKLU SEÇİM + ARA VEYA YOKSA EKLE) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-indigo-600" />
+                        Kategoriler (Çoklu Seçim — Ara veya Yeni Kategori Ekle)
+                      </label>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        {bookForm.category_ids.length} kategori seçili
+                      </span>
+                    </div>
+
+                    {/* Seçili Kategori Rozetleri */}
+                    {bookForm.category_ids.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pb-1">
+                        {bookForm.category_ids.map((id) => {
+                          const c = categories.find((item) => item.id === id);
+                          if (!c) return null;
                           return (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() =>
-                                setBookForm({
-                                  ...bookForm,
-                                  category_ids: toggleSelection(bookForm.category_ids, c.id),
-                                })
-                              }
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                                selected
-                                  ? 'bg-indigo-600 text-white shadow-2xs'
-                                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                              }`}
+                            <span
+                              key={id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200"
                             >
-                              {selected && <Check className="w-3 h-3" />}
                               {c.name}
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setBookForm({
+                                    ...bookForm,
+                                    category_ids: toggleSelection(bookForm.category_ids, id),
+                                  })
+                                }
+                                className="hover:text-rose-600 ml-0.5"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
                           );
                         })}
                       </div>
                     )}
+
+                    <div className="relative flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={categoryQuery}
+                          onChange={(e) => setCategoryQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && categoryQuery.trim()) {
+                              e.preventDefault();
+                              handleQuickCreateCategory(categoryQuery);
+                            }
+                          }}
+                          placeholder="Kategori ara veya listede yoksa yeni adını yazın..."
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {categoryQuery.trim() && !exactCategoryExists && (
+                        <button
+                          type="button"
+                          disabled={inlineCreating}
+                          onClick={() => handleQuickCreateCategory(categoryQuery)}
+                          className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          "{categoryQuery.trim()}" Ekle & Seç
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pt-1">
+                      {filteredCategories.map((c) => {
+                        const selected = bookForm.category_ids.includes(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() =>
+                              setBookForm({
+                                ...bookForm,
+                                category_ids: toggleSelection(bookForm.category_ids, c.id),
+                              })
+                            }
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                              selected
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {selected && <Check className="w-3 h-3" />}
+                            {c.name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </>
               )}
@@ -813,7 +1187,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || inlineCreating}
                   className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white shadow-xs cursor-pointer"
                 >
                   {saving ? 'Kaydediliyor...' : editingItem ? 'Güncelle' : 'Kaydet'}
@@ -826,4 +1200,3 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     </div>
   );
 }
-

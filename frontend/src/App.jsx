@@ -23,6 +23,7 @@ import AuthModal from './components/AuthModal';
 import BookDetailModal from './components/BookDetailModal';
 import MyLibraryView from './components/MyLibraryView';
 import AdminPanel from './components/AdminPanel';
+import SearchableFilterSelect from './components/SearchableFilterSelect';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'mylibrary' | 'admin'
@@ -298,71 +299,50 @@ export default function App() {
                   mobileFilterOpen ? 'grid' : 'hidden lg:grid'
                 } grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-3 border-t border-slate-100`}
               >
-                {/* Category Filter */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Kategori
-                  </label>
-                  <select
-                    value={categoryFilter}
-                    onChange={(e) => {
-                      setCategoryFilter(e.target.value);
-                      setPage(1);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="">Tüm Kategoriler</option>
-                    {categoriesList.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Category Filter (Aramalı Seçim) */}
+                <SearchableFilterSelect
+                  label="Kategori"
+                  placeholder="Kategori ara veya seç..."
+                  options={categoriesList.map((c) => ({
+                    label: c.name,
+                    value: c.name,
+                  }))}
+                  value={categoryFilter}
+                  onChange={(val) => {
+                    setCategoryFilter(val);
+                    setPage(1);
+                  }}
+                />
 
-                {/* Author Filter */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Yazar
-                  </label>
-                  <select
-                    value={authorFilter}
-                    onChange={(e) => {
-                      setAuthorFilter(e.target.value);
-                      setPage(1);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="">Tüm Yazarlar</option>
-                    {authorsList.map((a) => (
-                      <option key={a.id} value={a.last_name}>
-                        {a.first_name} {a.last_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Author Filter (Aramalı Seçim) */}
+                <SearchableFilterSelect
+                  label="Yazar"
+                  placeholder="Yazar adı ara veya seç..."
+                  options={authorsList.map((a) => ({
+                    label: `${a.first_name} ${a.last_name}`,
+                    value: a.last_name,
+                  }))}
+                  value={authorFilter}
+                  onChange={(val) => {
+                    setAuthorFilter(val);
+                    setPage(1);
+                  }}
+                />
 
-                {/* Publisher Filter */}
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Yayınevi
-                  </label>
-                  <select
-                    value={publisherFilter}
-                    onChange={(e) => {
-                      setPublisherFilter(e.target.value);
-                      setPage(1);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="">Tüm Yayınevleri</option>
-                    {publishersList.map((p) => (
-                      <option key={p.id} value={p.name}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Publisher Filter (Aramalı Seçim) */}
+                <SearchableFilterSelect
+                  label="Yayınevi"
+                  placeholder="Yayınevi ara veya seç..."
+                  options={publishersList.map((p) => ({
+                    label: p.name,
+                    value: p.name,
+                  }))}
+                  value={publisherFilter}
+                  onChange={(val) => {
+                    setPublisherFilter(val);
+                    setPage(1);
+                  }}
+                />
 
                 {/* Sort By */}
                 <div>
