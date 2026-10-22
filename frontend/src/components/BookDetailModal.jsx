@@ -336,7 +336,7 @@ export default function BookDetailModal({
                     <p className="text-amber-800 leading-relaxed">
                       {userQueuePos > 1
                         ? `Rezerve listesinde ${userQueuePos}. sıradasınız. Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz.`
-                        : 'Kitap stoğu çıktığı anda 24 saatlik ödünç alma süreniz başlayacaktır.'}
+                        : 'Kitabı rezerve ettiniz; stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar.'}
                     </p>
                   </div>
                 ) : allStockReservedByOthers ? (
@@ -403,8 +403,8 @@ export default function BookDetailModal({
                       <p className="font-bold">Bu kitap şu an stokta bulunmuyor (Stok = 0).</p>
                       <p className="text-amber-700 mt-0.5">
                         {reservedCount > 0
-                          ? `Şu an sırada ${reservedCount} kişi bekliyor. Rezerve ederseniz ${reservedCount + 1}. sıraya yerleşirsiniz; stok çıktığında ve sıra size geldiğinde 24 saatlik süreniz başlar.`
-                          : 'Kitap stoğu çıktığı anda 24 saatlik ödünç alma hakkı kazanmak için rezervasyon yapabilirsiniz.'}
+                          ? `Şu an sırada ${reservedCount} kişi bekliyor. Kitabı rezerve ettiğinizde (${reservedCount + 1}. sıra) ve stok olduğunda, sıra size geldiğinde kitabı ödünç almak için 24 saatlik süreniz başlar.`
+                          : 'Kitabı rezerve ettiğinizde ve stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar.'}
                       </p>
                     </div>
                     <button

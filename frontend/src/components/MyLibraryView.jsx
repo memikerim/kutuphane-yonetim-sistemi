@@ -406,7 +406,7 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                           {res.queue_message ||
                             (queuePos > 1
                               ? `Rezerve listesinde ${queuePos}. sıradasınız. Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz.`
-                              : 'Kitap stoğu çıktığı anda 24 saatlik süreniz başlayacaktır.')}
+                              : 'Kitabı rezerve ettiğinizde ve stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar.')}
                         </p>
                       </td>
 

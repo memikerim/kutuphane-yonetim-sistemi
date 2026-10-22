@@ -153,7 +153,7 @@ class Reservation(UUIDPrimaryKeyMixin, Base):
             )
         return (
             "Rezerve listesinde 1. sıradasınız. "
-            "Kitap stoğu çıktığı anda 24 saatlik ödünç alma süreniz başlayacaktır."
+            "Kitabı rezerve ettiğinizde ve stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar."
         )
 
 
