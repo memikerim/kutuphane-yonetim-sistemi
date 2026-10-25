@@ -82,17 +82,37 @@ export default function App() {
     }
   }, []);
 
-  // Load filter dropdown options (Authors, Categories, Publishers)
-  const fetchFilterMetadata = useCallback(async () => {
+  // Load filter dropdown options (Authors, Categories, Publishers) with session caching
+  const fetchFilterMetadata = useCallback(async (force = false) => {
     try {
+      if (!force) {
+        const cached = sessionStorage.getItem('kutuphane_metadata');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.authors && parsed?.categories && parsed?.publishers) {
+            setAuthorsList(parsed.authors);
+            setCategoriesList(parsed.categories);
+            setPublishersList(parsed.publishers);
+            return;
+          }
+        }
+      }
+
       const [a, c, p] = await Promise.all([
         api.getAuthors(),
         api.getCategories(),
         api.getPublishers(),
       ]);
-      setAuthorsList(a || []);
-      setCategoriesList(c || []);
-      setPublishersList(p || []);
+      const authors = a || [];
+      const categories = c || [];
+      const publishers = p || [];
+      setAuthorsList(authors);
+      setCategoriesList(categories);
+      setPublishersList(publishers);
+      sessionStorage.setItem(
+        'kutuphane_metadata',
+        JSON.stringify({ authors, categories, publishers })
+      );
     } catch {
       // ignore initial metadata errors if backend is starting
     }
@@ -628,7 +648,8 @@ export default function App() {
           <AdminPanel
             notify={notify}
             onCatalogChanged={() => {
-              fetchFilterMetadata();
+              sessionStorage.removeItem('kutuphane_metadata');
+              fetchFilterMetadata(true);
               fetchBooks();
             }}
           />

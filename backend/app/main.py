@@ -40,11 +40,22 @@ async def _periodic_reservation_and_overdue_sync() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     if not getattr(_app.state, "testing", False):
+        # Soğuk başlatma (cold start) optimizasyonu:
+        # Tablolar ve veriler zaten mevcutsa create_all ve JSON ayrıştırmasını atlar (~2 sn kazandırır).
+        # Yalnızca veritabanı tamamen boşsa seed_cloud() çalıştırılır.
+        need_seed = False
         try:
-            from app.seed_cloud import seed_cloud
-            seed_cloud()
-        except Exception as e:
-            logger.warning(f"Otomatik şema ve tohumlama sırasında hata: {e}")
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1 FROM books LIMIT 1"))
+        except Exception:
+            need_seed = True
+
+        if need_seed:
+            try:
+                from app.seed_cloud import seed_cloud
+                seed_cloud()
+            except Exception as e:
+                logger.warning(f"Otomatik şema ve tohumlama sırasında hata: {e}")
 
     sync_task = None
     if not getattr(_app.state, "testing", False):

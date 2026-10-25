@@ -82,7 +82,7 @@ class Book(UUIDPrimaryKeyMixin, Base):
     stock_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    publisher: Mapped[Publisher | None] = relationship(back_populates="books")
+    publisher: Mapped[Publisher | None] = relationship(back_populates="books", lazy="joined")
     authors: Mapped[list[Author]] = relationship(
         secondary=book_authors, back_populates="books", lazy="selectin"
     )
