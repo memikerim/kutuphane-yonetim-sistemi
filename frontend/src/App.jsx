@@ -637,18 +637,8 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200/80 py-5 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
-          <span>
-            © {new Date().getFullYear()} Kütüphane Yönetim Sistemi — FastAPI & React + Tailwind CSS
-          </span>
-          <a
-            href="http://localhost:8000/docs"
-            target="_blank"
-            rel="noreferrer"
-            className="text-indigo-600 hover:underline font-medium"
-          >
-            Swagger API Dokümantasyonu (/docs) →
-          </a>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-400">
+          © {new Date().getFullYear()} Kütüphane Yönetim Sistemi — FastAPI & React + Tailwind CSS
         </div>
       </footer>
 
