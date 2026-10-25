@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy import text
 
 import app.models  # noqa: F401  - tüm modelleri/ilişkileri mapper'a kaydeder
@@ -133,6 +134,12 @@ app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(catalog_router, prefix=API_PREFIX)
 app.include_router(borrowing_router, prefix=API_PREFIX)
 app.include_router(review_router, prefix=API_PREFIX)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Kök dizine girildiğinde doğrudan Swagger dokümantasyonuna yönlendirir."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health", tags=["health"], summary="Sistem sağlık kontrolü")
