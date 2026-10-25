@@ -31,7 +31,7 @@ def test_admin_unpaid_penalties_and_collection_flow(client, auth_headers, admin_
     sim_res = client.patch(f"/api/v1/admin/borrowings/{borrow_id}/simulate-overdue", headers=admin_headers)
     assert sim_res.status_code == 200
 
-    # 4. Artık borçlu listesinde görünmelidir
+    # 4. Aktif gecikmede (OVERDUE) borçlu listesinde görünmelidir
     unpaid_res_overdue = client.get("/api/v1/admin/unpaid-penalties", headers=admin_headers)
     assert unpaid_res_overdue.status_code == 200
     data = unpaid_res_overdue.json()
@@ -43,12 +43,27 @@ def test_admin_unpaid_penalties_and_collection_flow(client, auth_headers, admin_
     assert item["penalty_amount"] > 0
     assert item["is_penalty_paid"] is False
 
-    # 5. Admin elden tahsilat yapar ("Tahsil Et / Borcu Kapat")
+    # 5. Kitap iade edilir (RETURNED) ancak ceza henüz ödenmemiştir
+    ret_res = client.patch(f"/api/v1/borrowings/{borrow_id}/return", headers=auth_headers)
+    assert ret_res.status_code == 200
+    assert ret_res.json()["status"] == "RETURNED"
+
+    # 6. İade edilmiş ancak cezası ödenmemiş olarak borçlu listesinde görünmeye devam etmelidir
+    unpaid_res_returned = client.get("/api/v1/admin/unpaid-penalties", headers=admin_headers)
+    assert unpaid_res_returned.status_code == 200
+    data_ret = unpaid_res_returned.json()
+    assert data_ret["debtor_count"] == 1
+    item_ret = data_ret["items"][0]
+    assert item_ret["status"] == "RETURNED"
+    assert item_ret["penalty_amount"] > 0
+    assert item_ret["is_penalty_paid"] is False
+
+    # 7. Admin elden tahsilat yapar ("Tahsil Et / Borcu Kapat")
     pay_res = client.post(f"/api/v1/borrowings/{borrow_id}/pay-penalty", headers=admin_headers)
     assert pay_res.status_code == 200
     assert pay_res.json()["is_penalty_paid"] is True
 
-    # 6. Borç ödendikten sonra listeden düşer
+    # 8. Borç ödendikten sonra listeden düşer
     unpaid_res_after = client.get("/api/v1/admin/unpaid-penalties", headers=admin_headers)
     assert unpaid_res_after.status_code == 200
     assert unpaid_res_after.json()["debtor_count"] == 0

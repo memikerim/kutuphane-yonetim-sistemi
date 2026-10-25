@@ -24,7 +24,7 @@ class UnpaidPenaltyItem(BaseModel):
     book_title: str = Field(..., description="Kitap başlığı")
     borrow_date: date = Field(..., description="Ödünç alınma tarihi")
     due_date: date = Field(..., description="Son teslim tarihi")
-    return_date: datetime | None = Field(None, description="İade tarihi (iade edilmişse)")
+    return_date: date | datetime | None = Field(None, description="İade tarihi (iade edilmişse)")
     status: str = Field(..., description="Durum: OVERDUE (Gecikmiş Aktif) veya RETURNED (İade Edilmiş/Ödenmemiş)")
     overdue_days: int = Field(..., description="Geciken gün sayısı")
     penalty_amount: float = Field(..., description="Hesaplanan / tahakkuk eden ceza tutarı (TL)")

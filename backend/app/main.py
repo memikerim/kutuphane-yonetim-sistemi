@@ -38,28 +38,17 @@ async def _periodic_reservation_and_overdue_sync() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    try:
-        with engine.begin() as conn:
-            if conn.dialect.name == "postgresql":
-                conn.execute(
-                    text("ALTER TABLE reservations ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL")
-                )
-                conn.execute(
-                    text("ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0")
-                )
-                conn.execute(
-                    text("ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_penalty_paid BOOLEAN NOT NULL DEFAULT FALSE")
-                )
-    except Exception:
-        pass
+    sync_task = None
+    if not getattr(_app.state, "testing", False):
+        sync_task = asyncio.create_task(_periodic_reservation_and_overdue_sync())
 
-    sync_task = asyncio.create_task(_periodic_reservation_and_overdue_sync())
     try:
         yield
     finally:
-        sync_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sync_task
+        if sync_task:
+            sync_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sync_task
 
 
 tags_metadata = [

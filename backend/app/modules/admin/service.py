@@ -10,6 +10,14 @@ from app.modules.borrowing.models import Borrowing, BorrowingStatus
 from app.modules.borrowing.service import sync_overdue_borrowings
 
 
+def _to_date(val: date | datetime | None) -> date | None:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    return val
+
+
 def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
     """
     Hem iade edilmiş ama cezası henüz ödenmemiş kayıtları hem de şu an teslim tarihi
@@ -32,10 +40,7 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
             # İade edilmiş ama cezası ödenmemiş
             if (b.penalty_amount or 0.0) > 0.0 and not b.is_penalty_paid:
                 penalty = float(b.penalty_amount)
-                if b.return_date and b.return_date.date() > b.due_date:
-                    overdue_days = (b.return_date.date() - b.due_date).days
-                elif today > b.due_date:
-                    overdue_days = (today - b.due_date).days
+                overdue_days = b.overdue_days
                 total_unpaid += penalty
                 items.append(
                     UnpaidPenaltyItem(
@@ -45,9 +50,9 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                         user_email=b.user.email if b.user else "Bilinmiyor",
                         book_id=b.book_id,
                         book_title=b.book.title if b.book else "Bilinmiyor",
-                        borrow_date=b.borrow_date.date() if isinstance(b.borrow_date, datetime) else b.borrow_date,
-                        due_date=b.due_date,
-                        return_date=b.return_date,
+                        borrow_date=_to_date(b.borrow_date),
+                        due_date=_to_date(b.due_date),
+                        return_date=_to_date(b.return_date),
                         status="RETURNED",
                         overdue_days=max(0, overdue_days),
                         penalty_amount=penalty,
@@ -56,9 +61,10 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                 )
         else:
             # Aktif ve süresi geçmiş (OVERDUE)
-            is_overdue = b.status == BorrowingStatus.OVERDUE or today > b.due_date
+            due_d = _to_date(b.due_date)
+            is_overdue = b.status == BorrowingStatus.OVERDUE or (due_d is not None and today > due_d)
             if is_overdue and not b.is_penalty_paid:
-                overdue_days = max(1, (today - b.due_date).days)
+                overdue_days = b.overdue_days or (max(1, (today - due_d).days) if due_d else 1)
                 penalty = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
                 total_unpaid += penalty
                 items.append(
@@ -69,8 +75,8 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                         user_email=b.user.email if b.user else "Bilinmiyor",
                         book_id=b.book_id,
                         book_title=b.book.title if b.book else "Bilinmiyor",
-                        borrow_date=b.borrow_date.date() if isinstance(b.borrow_date, datetime) else b.borrow_date,
-                        due_date=b.due_date,
+                        borrow_date=_to_date(b.borrow_date),
+                        due_date=due_d,
                         return_date=None,
                         status="OVERDUE",
                         overdue_days=overdue_days,

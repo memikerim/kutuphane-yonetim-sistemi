@@ -13,6 +13,7 @@ from app.core.base_model import Base
 from app.core.database import get_db
 from app.core.security import create_access_token, hash_password
 from app.main import app
+app.state.testing = True
 from app.modules.auth.models import Role, RoleName, User
 from app.modules.catalog.models import Author, Book, Category, Publisher
 
