@@ -61,6 +61,7 @@ class ReservationRead(BaseModel):
     book_id: uuid.UUID
     reservation_date: datetime
     expires_at: datetime | None = None
+    turn_starts_at: datetime | None = None
     remaining_seconds: int | None = None
     queue_position: int = 1
     people_ahead: int = 0

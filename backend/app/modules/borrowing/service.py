@@ -90,6 +90,9 @@ def sync_reservations(db: Session, book_id: uuid.UUID | None = None) -> None:
        bekleyen (PENDING) rezervasyonları listeden siler.
     2. 24 saatlik ödünç alma süresi (expires_at) dolmuş olan PENDING rezervasyonları
        listeden siler ve sıradaki bir sonraki kullanıcıya hakkı devreder.
+       ÖNEMLİ: Sıradaki kullanıcının 24 saatlik süresi, kullanıcının tekrar giriş yapmasını
+       beklemeden, bir önceki kullanıcının süresinin bittiği an (slot_freed_at) itibarıyla
+       otomatik olarak başlar ve zincirleme (cascade) olarak hesaplanır.
     3. Kitap stoğu mevcutsa (stock_count > 0), kuyruğun başındaki ilk `stock_count`
        kadar rezervasyon için 24 saatlik süreyi (expires_at) başlatır; kuyrukta daha
        geride bekleyenlerin süresini ise sıra kendilerine gelene kadar None tutar.
@@ -145,36 +148,67 @@ def sync_reservations(db: Session, book_id: uuid.UUID | None = None) -> None:
 
         if stock == 0:
             for res in list(queue):
-                if res.expires_at is not None and _ensure_utc(res.expires_at) <= now:
-                    db.delete(res)
-                    queue.remove(res)
-                    book_changed = True
-                elif res.expires_at is not None:
+                if res.expires_at is not None:
                     res.expires_at = None
                     book_changed = True
         else:
+            # 2. Aktif slotta (ilk `stock` sırada) süresi dolmuş rezervasyonları kronolojik sırayla
+            # düşür ve sıradaki kullanıcının 24 saatlik süresini bir önceki sürenin bittiği
+            # `slot_freed_at` anından itibaren (giriş yapmasını beklemeden) başlat.
             while True:
-                expired_found = False
-                for res in list(queue[:stock]):
-                    if res.expires_at is not None and _ensure_utc(res.expires_at) <= now:
-                        logger.info(
-                            "Rezervasyon 24 saat içinde ödünç alınmadığı için silindi -> reservation_id: %s, user_id: %s, book_id: %s",
-                            res.id,
-                            res.user_id,
-                            b_id,
-                        )
-                        db.delete(res)
-                        queue.remove(res)
-                        book_changed = True
-                        expired_found = True
-                if not expired_found:
+                expired_candidates = [
+                    r
+                    for r in queue[:stock]
+                    if r.expires_at is not None and _ensure_utc(r.expires_at) <= now
+                ]
+                if not expired_candidates:
                     break
 
+                expired_candidates.sort(key=lambda r: _ensure_utc(r.expires_at))
+                expired_res = expired_candidates[0]
+                slot_freed_at = _ensure_utc(expired_res.expires_at)
+
+                logger.info(
+                    "Rezervasyon 24 saat içinde ödünç alınmadığı için silindi -> reservation_id: %s, user_id: %s, book_id: %s, expired_at: %s",
+                    expired_res.id,
+                    expired_res.user_id,
+                    b_id,
+                    slot_freed_at.isoformat(),
+                )
+                db.delete(expired_res)
+                queue.remove(expired_res)
+                book_changed = True
+
+                # Sırası gelen bir sonraki rezervasyonun sayacını `now` yerine `slot_freed_at` anından başlat
+                for candidate in queue[:stock]:
+                    if candidate.expires_at is None:
+                        candidate.expires_at = slot_freed_at + timedelta(
+                            hours=RESERVATION_HOLD_HOURS
+                        )
+                        logger.info(
+                            "Rezervasyon sırası sıradaki kullanıcıya devredildi ve 24 saatlik sayaç otomatik başladı -> reservation_id: %s, user_id: %s, book_id: %s, start_at: %s, expires_at: %s",
+                            candidate.id,
+                            candidate.user_id,
+                            b_id,
+                            slot_freed_at.isoformat(),
+                            candidate.expires_at.isoformat(),
+                        )
+                        break
+
+            # 3. Stok yeni açıldıysa veya yeni rezervasyon yapıldıysa aktif slottaki
+            # rezervasyonların 24 saatlik süresini hemen başlat
             for idx, res in enumerate(queue):
                 if idx < stock:
                     if res.expires_at is None:
                         res.expires_at = now + timedelta(hours=RESERVATION_HOLD_HOURS)
                         book_changed = True
+                        logger.info(
+                            "Kitap stoğuna istinaden rezervasyon için 24 saatlik ödünç alma süresi başlatıldı -> reservation_id: %s, user_id: %s, book_id: %s, expires_at: %s",
+                            res.id,
+                            res.user_id,
+                            b_id,
+                            res.expires_at.isoformat(),
+                        )
                 else:
                     if res.expires_at is not None:
                         res.expires_at = None

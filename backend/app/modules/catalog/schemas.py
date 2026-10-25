@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -81,6 +82,7 @@ class BookRead(BookBase):
     categories: list[CategoryRead] = []
     reserved_count: int = 0
     reservation_queue_user_ids: list[uuid.UUID] = []
+    active_reservation_expires_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True)
 
 # --- ISBN Lookup ---

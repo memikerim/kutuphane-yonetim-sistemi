@@ -385,3 +385,77 @@ def test_overdue_or_unpaid_penalty_blocks_new_borrowing_and_reservation(db_sessi
     assert b2.status == BorrowingStatus.ACTIVE
 
 
+def test_reservation_timer_starts_without_user_login_and_cascades_accurately(db_session, test_user, test_book):
+    """
+    1. Kitap iade edilip stoğa girdiği anda 1. sıradaki kullanıcının 24 saatlik sayacı
+       kullanıcının giriş yapmasını beklemeden anında başlamalı.
+    2. 1. sıradaki kullanıcının süresi dolduğunda (örn. 6 saat önce dolmuşsa),
+       2. sıradaki kullanıcının 24 saatlik sayacı giriş yaptığı andan (24 saat) değil,
+       1. kullanıcının süresinin bittiği andan itibaren başlamış olmalı (18 saat kalmalı).
+    3. Aradan 30 saat geçmişse hem 1. hem 2. kullanıcının 24 saatlik hakkı dolmuş olmalı
+       ve sıra 3. kullanıcıya (18 saat kalan süreyle) geçmiş olmalı.
+    """
+    from datetime import datetime, timezone
+
+    test_book.stock_count = 1
+    db_session.commit()
+
+    user2 = User(email="cascade2@example.com", password_hash="h", first_name="C2", last_name="Test")
+    user3 = User(email="cascade3@example.com", password_hash="h", first_name="C3", last_name="Test")
+    user4 = User(email="cascade4@example.com", password_hash="h", first_name="C4", last_name="Test")
+    db_session.add_all([user2, user3, user4])
+    db_session.commit()
+
+    # test_user kitabı ödünç alır -> stok 0 olur
+    b = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(book_id=test_book.id, due_date=date.today() + timedelta(days=14)),
+    )
+    db_session.refresh(test_book)
+    assert test_book.stock_count == 0
+
+    # user2, user3 ve user4 sırayla rezerve eder (stok 0 iken kimsenin sayacı başlamaz)
+    res2 = service.create_reservation(db_session, user2, ReservationCreate(book_id=test_book.id))
+    res3 = service.create_reservation(db_session, user3, ReservationCreate(book_id=test_book.id))
+    res4 = service.create_reservation(db_session, user4, ReservationCreate(book_id=test_book.id))
+    assert res2.expires_at is None
+    assert res3.expires_at is None
+    assert res4.expires_at is None
+
+    # test_user kitabı iade ettiği anda user2 hiç giriş yapmasa bile user2'nin 24 saatlik sayacı başlamış olmalı!
+    service.return_borrowing(db_session, test_user, b.id)
+    db_session.refresh(res2)
+    db_session.refresh(res3)
+    assert res2.expires_at is not None
+    assert res3.expires_at is None
+    assert res3.turn_starts_at is not None
+
+    # Senaryo A: user2'nin 24 saatlik süresi 6 saat önce dolmuş olsun ve kimse giriş yapmamış olsun.
+    # Şimdi sistem kontrol edildiğinde user3'ün süresi 6 saat önce başlamış olmalı (yaklaşık 18 saat kalmalı, 24 saat değil!)
+    now = datetime.now(timezone.utc)
+    res2.expires_at = now - timedelta(hours=6)
+    db_session.commit()
+
+    service.sync_reservations(db_session, test_book.id)
+    db_session.refresh(res3)
+    db_session.refresh(res4)
+
+    assert res3.queue_position == 1
+    assert res3.can_borrow_now is True
+    assert res3.expires_at is not None
+    # Kalan süre 24 saat (86400 sn) değil, 18 saat (~64800 sn) civarında olmalı
+    assert 17 * 3600 <= res3.remaining_seconds <= 18 * 3600 + 60
+
+    # Senaryo B: user3'ün de süresi 2 saat önce dolmuş olsun -> sıra otomatik olarak user4'e geçmeli (22 saat kalmalı)
+    res3.expires_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    db_session.commit()
+
+    user4_reservations = service.get_user_reservations(db_session, user4)
+    assert len(user4_reservations) == 1
+    assert user4_reservations[0].queue_position == 1
+    assert user4_reservations[0].can_borrow_now is True
+    assert 21 * 3600 <= user4_reservations[0].remaining_seconds <= 22 * 3600 + 60
+
+
+

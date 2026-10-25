@@ -44,6 +44,7 @@ export default function BookDetailModal({
 
   const [dueDate, setDueDate] = useState(getDefaultDueDate());
   const [actionLoading, setActionLoading] = useState(false);
+  const [nowMs, setNowMs] = useState(Date.now());
 
   // Review form state
   const [rating, setRating] = useState(5);
@@ -85,6 +86,21 @@ export default function BookDetailModal({
   useEffect(() => {
     loadBookAndReviews();
   }, [initialBook.id, user?.id]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const current = Date.now();
+      setNowMs(current);
+      if (
+        book.active_reservation_expires_at &&
+        new Date(book.active_reservation_expires_at).getTime() <= current
+      ) {
+        loadBookAndReviews();
+        if (onBookUpdated) onBookUpdated();
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [book.active_reservation_expires_at]);
 
   const handleBorrow = async () => {
     if (!user) {
@@ -218,6 +234,16 @@ export default function BookDetailModal({
     book.stock_count > 0 && userQueuePos !== null && userQueuePos <= book.stock_count;
   const allStockReservedByOthers =
     book.stock_count > 0 && reservedCount >= book.stock_count && !userHasActiveSlot;
+
+  const activeSlotCountdownText = (() => {
+    if (!book.active_reservation_expires_at) return null;
+    const targetMs = new Date(book.active_reservation_expires_at).getTime();
+    const diffSec = Math.max(0, Math.floor((targetMs - nowMs) / 1000));
+    const hours = Math.floor(diffSec / 3600);
+    const minutes = Math.floor((diffSec % 3600) / 60);
+    const seconds = diffSec % 60;
+    return `${hours} saat ${String(minutes).padStart(2, '0')} dk ${String(seconds).padStart(2, '0')} sn`;
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
@@ -387,12 +413,20 @@ export default function BookDetailModal({
                 {userHasActiveSlot ? (
                   <div className="space-y-3">
                     <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-xs text-emerald-900">
-                      <p className="font-bold flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        Rezerve sırası sizde ({userQueuePos}. sıradasınız)!
-                      </p>
-                      <p className="text-emerald-700 mt-0.5">
-                        Kitap stoğu 24 saatliğine sizin için ayrıldı. Süreniz dolmadan hemen ödünç alabilirsiniz; ödünç aldığınızda rezerve listesinden otomatik silinir.
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          Rezerve sırası sizde ({userQueuePos}. sıradasınız)!
+                        </p>
+                        {activeSlotCountdownText && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-200/80 text-emerald-950 font-mono font-bold text-[11px]">
+                            <Clock className="w-3 h-3 animate-pulse" />
+                            Kalan Süre: {activeSlotCountdownText}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-emerald-700 mt-1">
+                        Kitap stoğu sizin için ayrıldı; giriş yapmanıza gerek kalmadan başlayan 24 saatlik süreniz dolmadan hemen ödünç alabilirsiniz.
                       </p>
                     </div>
                     <div className="flex flex-col sm:flex-row sm:items-end gap-3">
@@ -422,25 +456,38 @@ export default function BookDetailModal({
                     </div>
                   </div>
                 ) : userQueuePos !== null ? (
-                  <div className="bg-amber-50/90 border border-amber-200 p-3.5 rounded-xl text-xs text-amber-900 space-y-1">
-                    <p className="font-bold flex items-center gap-1.5">
-                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-                      Rezerve listesinde {userQueuePos}. sıradasınız
-                      {userQueuePos > 1 ? ` (Önünüzde ${userQueuePos - 1} kişi var)` : ''}
-                    </p>
+                  <div className="bg-amber-50/90 border border-amber-200 p-3.5 rounded-xl text-xs text-amber-900 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                        Rezerve listesinde {userQueuePos}. sıradasınız
+                        {userQueuePos > 1 ? ` (Önünüzde ${userQueuePos - 1} kişi var)` : ''}
+                      </p>
+                      {activeSlotCountdownText && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-amber-200/80 text-amber-950 font-mono font-bold text-[11px]">
+                          <Clock className="w-3 h-3 animate-pulse" />
+                          Öndeki Sıra Bitişi: {activeSlotCountdownText}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-amber-800 leading-relaxed">
                       {userQueuePos > 1
-                        ? `Rezerve listesinde ${userQueuePos}. sıradasınız. Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz.`
-                        : 'Kitabı rezerve ettiniz; stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar.'}
+                        ? `Rezerve listesinde ${userQueuePos}. sıradasınız. Önünüzdeki kullanıcının süresi bittiği anda (giriş yapmanıza gerek olmadan) 24 saatlik süreniz otomatik başlar.`
+                        : 'Kitap ödünç alınma stoğuna girdiği anda (giriş yapmanıza gerek olmadan) 24 saatlik ödünç alma süreniz otomatik başlar.'}
                     </p>
                   </div>
                 ) : allStockReservedByOthers ? (
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-amber-50/80 border border-amber-200 p-3.5 rounded-xl">
-                    <div className="text-xs text-amber-900">
+                    <div className="text-xs text-amber-900 space-y-1">
                       <p className="font-bold">
                         Stokta {book.stock_count} adet var ancak şu an başkasına rezerve edilmiş durumda!
                       </p>
-                      <p className="text-amber-700 mt-0.5">
+                      {activeSlotCountdownText && (
+                        <p className="font-mono font-bold text-amber-800">
+                          Mevcut sıradaki kullanıcının kalan süresi: {activeSlotCountdownText}
+                        </p>
+                      )}
+                      <p className="text-amber-700">
                         Rezerve eden kullanıcıların 24 saatlik süresi bitene kadar başka kullanıcı ödünç alamaz, sadece rezerve ederek sıraya girebilirsiniz (Sırada: {reservedCount} kişi).
                       </p>
                     </div>

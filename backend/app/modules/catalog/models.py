@@ -118,6 +118,18 @@ class Book(UUIDPrimaryKeyMixin, Base):
     def reservation_queue_user_ids(self) -> list[uuid.UUID]:
         return [r.user_id for r in self._sorted_pending_reservations]
 
+    @property
+    def active_reservation_expires_at(self):
+        from app.modules.borrowing.models import _ensure_utc
+
+        if not self.stock_count or self.stock_count <= 0:
+            return None
+        pending = self._sorted_pending_reservations[: self.stock_count]
+        expirations = [
+            _ensure_utc(r.expires_at) for r in pending if r.expires_at is not None
+        ]
+        return min(expirations) if expirations else None
+
     def __repr__(self) -> str:
         return f"<Book {self.isbn} - {self.title}>"
 

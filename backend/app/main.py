@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,16 +8,32 @@ from sqlalchemy import text
 
 import app.models  # noqa: F401  - tüm modelleri/ilişkileri mapper'a kaydeder
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import SessionLocal, engine
 from app.core.logging_config import setup_logging
 from app.modules.admin.router import router as admin_router
 from app.modules.auth.router import router as auth_router
 from app.modules.borrowing.router import router as borrowing_router
+from app.modules.borrowing.service import sync_overdue_borrowings, sync_reservations
 from app.modules.catalog.router import router as catalog_router
 from app.modules.review.router import router as review_router
 
 # Uygulama genelinde loglamayı başlat
 setup_logging()
+
+
+async def _periodic_reservation_and_overdue_sync() -> None:
+    """Kullanıcılar giriş yapmasa bile arka planda düzenli olarak süresi dolan
+    rezervasyonları düşürür ve sıradaki kullanıcının 24 saatlik sayacını başlatır."""
+    while True:
+        try:
+            await asyncio.sleep(15)
+            with SessionLocal() as db:
+                sync_overdue_borrowings(db)
+                sync_reservations(db)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
 
 
 @asynccontextmanager
@@ -34,7 +52,14 @@ async def lifespan(_app: FastAPI):
                 )
     except Exception:
         pass
-    yield
+
+    sync_task = asyncio.create_task(_periodic_reservation_and_overdue_sync())
+    try:
+        yield
+    finally:
+        sync_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sync_task
 
 
 tags_metadata = [

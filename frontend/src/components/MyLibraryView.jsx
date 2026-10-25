@@ -40,8 +40,8 @@ export default function MyLibraryView({ notify, onSelectBook }) {
   const [subTab, setSubTab] = useState('borrowings');
   const [nowMs, setNowMs] = useState(Date.now());
 
-  const fetchAll = async () => {
-    setLoading(true);
+  const fetchAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [borrowList, resList, booksResp] = await Promise.all([
         api.getMyBorrowings(),
@@ -77,27 +77,37 @@ export default function MyLibraryView({ notify, onSelectBook }) {
       setBorrowings(borrowList || []);
       setReservations(resList || []);
     } catch (err) {
-      notify(err.message || 'Bilgileriniz yüklenirken hata oluştu', 'error');
+      if (!silent) {
+        notify(err.message || 'Bilgileriniz yüklenirken hata oluştu', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAll();
+    fetchAll(false);
+    // Kullanıcı sayfada açık beklerken başka bir kullanıcı kitabı iade ettiğinde
+    // veya öndeki sıra değiştiğinde giriş yapmaya gerek kalmadan sayacın anında başlaması için periyodik senkronizasyon
+    const pollTimer = setInterval(() => {
+      fetchAll(true);
+    }, 10000);
+    return () => clearInterval(pollTimer);
   }, []);
 
-  // Live 1-second ticker for 24-hour reservation countdown
+  // Live 1-second ticker for 24-hour reservation countdown & queue transition
   useEffect(() => {
     const timer = setInterval(() => {
       const current = Date.now();
       setNowMs(current);
-      // If any active reservation countdown hits 0, refresh from backend so expired reservation is removed
-      const anyJustExpired = reservations.some(
-        (r) => r.expires_at && new Date(r.expires_at).getTime() <= current
+      // Aktif 24 saatlik süre veya sıranın kullanıcıya gelme süresi 0'a ulaştığı anda arka plandan yenile
+      const anyJustTransitioned = reservations.some(
+        (r) =>
+          (r.expires_at && new Date(r.expires_at).getTime() <= current) ||
+          (r.turn_starts_at && new Date(r.turn_starts_at).getTime() <= current)
       );
-      if (anyJustExpired) {
-        fetchAll();
+      if (anyJustTransitioned) {
+        fetchAll(true);
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -543,6 +553,7 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                 {reservations.map((res) => {
                   const book = bookMap[res.book_id];
                   const countdown = formatRemainingCountdown(res.expires_at, nowMs);
+                  const turnCountdown = formatRemainingCountdown(res.turn_starts_at, nowMs);
                   const queuePos = res.queue_position || 1;
                   const canBorrow = Boolean(res.can_borrow_now);
 
@@ -580,8 +591,8 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                         <p className="text-xs text-slate-600 leading-relaxed">
                           {res.queue_message ||
                             (queuePos > 1
-                              ? `Rezerve listesinde ${queuePos}. sıradasınız. Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz.`
-                              : 'Kitabı rezerve ettiğinizde ve stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar.')}
+                              ? `Rezerve listesinde ${queuePos}. sıradasınız. Önünüzdeki kullanıcının süresi bittiği anda 24 saatlik süreniz otomatik başlar.`
+                              : 'Kitap stoğa girdiği anda (giriş yapmanıza gerek kalmadan) 24 saatlik ödünç alma süreniz otomatik başlar.')}
                         </p>
                       </td>
 
@@ -590,17 +601,32 @@ export default function MyLibraryView({ notify, onSelectBook }) {
                           <div className="inline-flex flex-col gap-1 px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1">
                               <Clock className="w-3 h-3 animate-pulse" />
-                              Aktif Süre (24 Saat)
+                              Aktif Ödünç Alma Süresi (24 Saat)
                             </span>
                             <span className="text-xs font-mono font-bold">
                               {countdown.text} kaldı
                             </span>
                           </div>
+                        ) : turnCountdown ? (
+                          <div className="inline-flex flex-col gap-1 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1">
+                              <Clock className="w-3 h-3 animate-pulse" />
+                              Sıranın Size Gelmesine Kalan Maks. Süre
+                            </span>
+                            <span className="text-xs font-mono font-bold">
+                              {turnCountdown.text} sonra 24s sayacınız başlar
+                            </span>
+                          </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-medium">
-                            <Clock className="w-3.5 h-3.5 text-slate-400" />
-                            Stok / Sıra Bekleniyor (24s henüz başlamadı)
-                          </span>
+                          <div className="inline-flex flex-col gap-0.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-700">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-slate-400" />
+                              Kitap Ödünçte (Stok = 0)
+                            </span>
+                            <span className="text-[11px] font-medium text-slate-600">
+                              Stoğa girdiği anda 24s sayacınız otomatik başlar
+                            </span>
+                          </div>
                         )}
                       </td>
 

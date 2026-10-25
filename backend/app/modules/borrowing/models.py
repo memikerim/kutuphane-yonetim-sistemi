@@ -173,21 +173,74 @@ class Reservation(UUIDPrimaryKeyMixin, Base):
         return self.queue_position <= self.book.stock_count
 
     @property
+    def turn_starts_at(self) -> datetime | None:
+        """
+        Eğer kitap stokta varsa (stock_count > 0) ancak sıra henüz bu kullanıcıya
+        gelmemişse (queue_position > stock_count), öndeki kullanıcı(lar) ödünç almazsa
+        bu kullanıcının 24 saatlik süresinin otomatik başlayacağı kesin tarihi döner.
+        """
+        from datetime import timedelta
+
+        if self.can_borrow_now or not self.book or (self.book.stock_count or 0) <= 0:
+            return None
+        if not self.book.reservations:
+            return None
+
+        stock = self.book.stock_count
+        pending = [
+            r for r in self.book.reservations if r.status == ReservationStatus.PENDING
+        ]
+        pending.sort(
+            key=lambda r: (
+                _ensure_utc(r.reservation_date).timestamp() if r.reservation_date else 0.0,
+                str(r.id),
+            )
+        )
+
+        my_idx: int | None = None
+        for idx, r in enumerate(pending):
+            if r.id == self.id:
+                my_idx = idx
+                break
+
+        if my_idx is None or my_idx < stock:
+            return None
+
+        active_expirations = sorted(
+            [
+                _ensure_utc(r.expires_at)
+                for r in pending[:stock]
+                if r.expires_at is not None
+            ]
+        )
+        if not active_expirations:
+            return None
+
+        slot_idx = (my_idx - stock) % len(active_expirations)
+        cycles = (my_idx - stock) // len(active_expirations)
+        return active_expirations[slot_idx] + timedelta(hours=24 * cycles)
+
+    @property
     def queue_message(self) -> str:
         pos = self.queue_position
         if self.can_borrow_now:
             return (
                 f"Rezerve listesinde {pos}. sıradasınız (Sıra sizde!). "
-                "Kitap stoğu sizin için ayrıldı, 24 saatlik süreniz dolmadan ödünç alabilirsiniz."
+                "Kitap stoğu sizin için ayrıldı; giriş yapmanıza gerek kalmadan başlayan 24 saatlik süreniz dolmadan ödünç alabilirsiniz."
             )
         if pos > 1:
+            if self.book and (self.book.stock_count or 0) > 0:
+                return (
+                    f"Rezerve listesinde {pos}. sıradasınız. "
+                    "Önünüzdeki kullanıcının 24 saatlik süresi bittiği anda (giriş yapmanıza gerek olmadan) sizin 24 saatlik süreniz otomatik başlar."
+                )
             return (
                 f"Rezerve listesinde {pos}. sıradasınız. "
-                "Diğer kullanıcılar süreleri bitene kadar ödünç almazlarsa ödünç alabilirsiniz."
+                "Kitap stoğa girip önünüzdeki kullanıcıların sırası tamamlandığı anda 24 saatlik süreniz otomatik başlar."
             )
         return (
             "Rezerve listesinde 1. sıradasınız. "
-            "Kitabı rezerve ettiğinizde ve stok olduğunda kitabı ödünç almak için 24 saatlik süreniz başlar."
+            "Kitap ödünç alınma stoğuna girdiği anda (giriş yapmanıza gerek olmadan) 24 saatlik ödünç alma süreniz otomatik başlar."
         )
 
 
