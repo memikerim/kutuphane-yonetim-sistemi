@@ -9,8 +9,61 @@ from typing import Any
 _audit_logs: deque[dict[str, Any]] = deque(maxlen=200)
 
 
+def _persist_log_entry(entry: dict[str, Any]) -> None:
+    """Log kaydını veritabanına kalıcı olarak kaydeder."""
+    try:
+        from app.core.database import SessionLocal
+        from app.modules.admin.models import SystemLog
+
+        # ISO timestamp ayrıştırma
+        ts_str = entry.get("timestamp")
+        ts = datetime.fromisoformat(ts_str) if ts_str else datetime.now(timezone.utc)
+
+        with SessionLocal() as db:
+            log_obj = SystemLog(
+                id=uuid.UUID(entry["id"]),
+                timestamp=ts,
+                category=entry["category"],
+                level=entry["level"],
+                message=entry["message"],
+            )
+            db.add(log_obj)
+            db.commit()
+    except Exception:
+        # Loglama hatası ana akışı veya API isteğini asla kesmemelidir
+        pass
+
+
+def load_persisted_logs() -> None:
+    """Sunucu yeniden başladığında son 200 log kaydını veritabanından hafızaya geri yükler."""
+    try:
+        from app.core.database import SessionLocal
+        from app.modules.admin.models import SystemLog
+
+        with SessionLocal() as db:
+            recent_logs = (
+                db.query(SystemLog)
+                .order_by(SystemLog.timestamp.desc())
+                .limit(200)
+                .all()
+            )
+            # En eskiden en yeniye doğru sıralayarak deque'e aktar
+            for r in reversed(recent_logs):
+                entry = {
+                    "id": str(r.id),
+                    "timestamp": r.timestamp.isoformat() if r.timestamp else datetime.now(timezone.utc).isoformat(),
+                    "category": r.category,
+                    "level": r.level,
+                    "message": r.message,
+                }
+                if not any(x["id"] == entry["id"] for x in _audit_logs):
+                    _audit_logs.append(entry)
+    except Exception:
+        pass
+
+
 class InMemoryAuditLogHandler(logging.Handler):
-    """Sistemde gerçekleşen işlemleri hafızada tutarak Admin Paneli'ne servis eden handler."""
+    """Sistemde gerçekleşen işlemleri hafızada ve veritabanında tutarak Admin Paneli'ne servis eden handler."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -44,6 +97,7 @@ class InMemoryAuditLogHandler(logging.Handler):
                 "message": msg,
             }
             _audit_logs.append(log_entry)
+            _persist_log_entry(log_entry)
         except Exception:
             self.handleError(record)
 
@@ -52,7 +106,7 @@ _audit_handler = InMemoryAuditLogHandler()
 
 
 def setup_logging(level: int = logging.INFO) -> None:
-    """Uygulama genelinde standart konsol ve hafıza-içi loglama yapılandırması."""
+    """Uygulama genelinde standart konsol, hafıza-içi ve veritabanı loglama yapılandırması."""
     log_format = "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s"
 
     # Kök logger yapılandırması
@@ -70,7 +124,10 @@ def setup_logging(level: int = logging.INFO) -> None:
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
-    # Başlangıç log kaydı
+    # Önceki kayıtlı logları veritabanından hafızaya yükle
+    load_persisted_logs()
+
+    # Başlangıç log kaydı (eğer hiç log yoksa)
     if not _audit_logs:
         add_system_log("SYSTEM", "INFO", "Kütüphane Yönetim Sistemi servisleri başlatıldı.")
 
@@ -91,10 +148,12 @@ def get_system_logs(
 
 def add_system_log(category: str, level: str, message: str) -> None:
     """Doğrudan audit log ekleme yardımcısı."""
-    _audit_logs.append({
+    entry = {
         "id": str(uuid.uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "category": category.upper(),
         "level": level.upper(),
         "message": message,
-    })
+    }
+    _audit_logs.append(entry)
+    _persist_log_entry(entry)

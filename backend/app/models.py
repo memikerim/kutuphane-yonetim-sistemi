@@ -20,6 +20,7 @@ from app.modules.catalog.models import (
     book_authors,
     book_categories,
 )
+from app.modules.admin.models import SystemLog
 from app.modules.review.models import Review, ReviewReaction
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "Publisher", "Category", "Author", "Book", "book_authors", "book_categories",
     "Borrowing", "BorrowingStatus", "Reservation", "ReservationStatus",
     "Review", "ReviewReaction",
+    "SystemLog",
 ]
 
