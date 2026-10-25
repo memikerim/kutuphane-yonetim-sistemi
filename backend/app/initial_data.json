@@ -1,0 +1,1467 @@
+{
+  "roles": [
+    {
+      "id": 1,
+      "name": "USER"
+    },
+    {
+      "id": 2,
+      "name": "ADMIN"
+    }
+  ],
+  "users": [
+    {
+      "id": "452ee8c2-8dbf-4e6d-8823-6d999436f211",
+      "email": "ali@kutuphane.com",
+      "first_name": "Ali",
+      "last_name": "Yılmaz",
+      "password_hash": "$2b$12$7/D84kjGa41FJaH1lHPV2u82HtKga7e6TY5qWnU3t/BlxnJZj.j2u",
+      "roles": [
+        "USER",
+        "ADMIN"
+      ]
+    },
+    {
+      "id": "6cf71489-beb2-4914-9075-825a50ed5e2f",
+      "email": "admin_e205caf8@test.com",
+      "first_name": "A",
+      "last_name": "A",
+      "password_hash": "$2b$12$ggQ8aXT2sNC8qhugxFxureRWjxxLWoN9i3JYn2Sb3Lk2MK5fXaq4G",
+      "roles": [
+        "USER",
+        "ADMIN"
+      ]
+    },
+    {
+      "id": "c5fe50d3-cdd1-410b-9e2e-259f9c93f934",
+      "email": "user_e205caf8@test.com",
+      "first_name": "U",
+      "last_name": "U",
+      "password_hash": "$2b$12$24wJSrrUHFW.xBkOTLssQOmEPQD9j0l4xZ6DZrVmHlt/OZEwEWBGi",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "id": "0e98242f-e004-4d6b-aff5-c46a33f59044",
+      "email": "admin_dfc897cd@test.com",
+      "first_name": "A",
+      "last_name": "A",
+      "password_hash": "$2b$12$zb2jY39Jzk36edHr5GFkjOQChG3KBVP.CR6MvV/PCj7mM7mzb3k72",
+      "roles": [
+        "USER",
+        "ADMIN"
+      ]
+    },
+    {
+      "id": "664930b1-a9ff-4adc-a26d-2712127c15cb",
+      "email": "user_dfc897cd@test.com",
+      "first_name": "U",
+      "last_name": "U",
+      "password_hash": "$2b$12$nF0p5JnQL7gt1iD8NClUBOIbBIWB18oVudTRt3nijPcepeDM9FuOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "id": "ab02a8cb-3816-4692-b567-10abc1d2a649",
+      "email": "erimmemik07@gmail.com",
+      "first_name": "Memik",
+      "last_name": "Erim",
+      "password_hash": "$2b$12$Wudw.r5FJoGx6dZLhTM2xOO1LWiH05XP9Mb/gLR82PUOfTDfAs7Sa",
+      "roles": [
+        "USER",
+        "ADMIN"
+      ]
+    },
+    {
+      "id": "3ea64128-e554-41f0-a084-46a721668294",
+      "email": "test@test.com",
+      "first_name": "test",
+      "last_name": "kullanıcısı",
+      "password_hash": "$2b$12$XRmAKPGs7P3K97bBIso6P.cJioroU/CGCXt00F0QKXl259vvjmJ9.",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "publishers": [
+    {
+      "id": "8d8c3e7c-b7fb-4a1d-bbfd-281ccc70d4c1",
+      "name": "İş Bankası Kültür Yayınları",
+      "contact_info": "İstiklal Cad. Meşelik Sok. No:2 Beyoğlu/İstanbul | info@iskultur.com.tr"
+    },
+    {
+      "id": "ec208bed-aece-44bb-98b4-77c78a2efa2e",
+      "name": "Can Yayınları",
+      "contact_info": "Hayriye Cad. No:2 Galatasaray/İstanbul | iletisim@canyayinlari.com"
+    },
+    {
+      "id": "45474318-5ceb-41f8-86ee-fd0c28ea41c3",
+      "name": "İletişim Yayınları",
+      "contact_info": "Cumhuriyet Cad. No:36 دارülbedayi Beyoğlu/İstanbul | iletisim@iletisim.com.tr"
+    },
+    {
+      "id": "8e8e5205-b2ed-4ef4-a358-3388b3043bfa",
+      "name": "Yapı Kredi Yayınları",
+      "contact_info": "İstiklal Cad. No:161 Beyoğlu/İstanbul | ykykultur@ykykultur.com.tr"
+    },
+    {
+      "id": "617bd1a4-0cb8-4f88-8489-9f64f9b0aeab",
+      "name": "İthaki Yayınları",
+      "contact_info": "Caferağa Mah. Neşet Ömer Sok. No:10 Kadıköy/İstanbul | info@ithaki.com.tr"
+    },
+    {
+      "id": "4e2020a0-e106-47d7-878f-c828652478f4",
+      "name": "Kolektif Kitap",
+      "contact_info": "Caferağa Mah. Moda Cad. Kadıköy/İstanbul | info@kolektifkitap.com"
+    },
+    {
+      "id": "c49b989a-00cf-4a82-9ac8-687c1fb4901c",
+      "name": "diyanet yayınları",
+      "contact_info": null
+    },
+    {
+      "id": "ea8cdaa8-c728-468e-b268-0e68233f9b2b",
+      "name": "Ithaki Yayinlari",
+      "contact_info": null
+    },
+    {
+      "id": "fa9a0760-cf18-417c-8452-5cb43cdfd3ff",
+      "name": "YKY",
+      "contact_info": null
+    },
+    {
+      "id": "5987ccbe-7939-4d37-b320-eab233bfbf5c",
+      "name": "Dergah Yaynlar",
+      "contact_info": null
+    },
+    {
+      "id": "0e9507ef-949d-4dd9-88d3-27ee4550d7fb",
+      "name": "Dogan Kitap",
+      "contact_info": null
+    },
+    {
+      "id": "6baba694-f847-4374-9ea0-d7dd1aa7b3dc",
+      "name": "Is Bankasi",
+      "contact_info": null
+    },
+    {
+      "id": "d4e9a377-e214-4447-b2bd-5cdbe5dd80a0",
+      "name": "İş Bankası Kültür Yayınları",
+      "contact_info": null
+    },
+    {
+      "id": "a8572280-4f33-402b-be68-fdd04b70c5ba",
+      "name": "Bankas Kltr Yaynlar",
+      "contact_info": null
+    },
+    {
+      "id": "4bb7e329-591b-4dae-a488-8ba0b41bd136",
+      "name": "Iletişim",
+      "contact_info": null
+    },
+    {
+      "id": "d0709d70-63a5-4553-9f3c-35d968b7a37a",
+      "name": "Metis Yayıncılık",
+      "contact_info": null
+    },
+    {
+      "id": "2dc10d46-3081-4b9f-b83f-9dafabed0dc1",
+      "name": "Yap Kredi Yaynlar",
+      "contact_info": null
+    },
+    {
+      "id": "3ae15750-5f88-47c6-9f6e-0a4de8ea5cef",
+      "name": "Is Bankasi Kültür Yayinlari",
+      "contact_info": null
+    },
+    {
+      "id": "d60e47e5-0ec2-4f0d-847f-7a290888260e",
+      "name": "Dex Kitap",
+      "contact_info": null
+    },
+    {
+      "id": "e08e722e-6dc7-4779-81a0-b3b4d2ea6574",
+      "name": "Turkuvaz Kitap",
+      "contact_info": null
+    },
+    {
+      "id": "44ed735f-19d0-4466-8339-54979c8355b2",
+      "name": "Pearson Education",
+      "contact_info": null
+    },
+    {
+      "id": "3c670c3b-200b-40ba-a396-f5b5437d4270",
+      "name": "Addison-Wesley",
+      "contact_info": null
+    },
+    {
+      "id": "bcdb91ff-7c2c-4fd2-a3c3-a075126e629a",
+      "name": "MIT Press",
+      "contact_info": null
+    },
+    {
+      "id": "215d88ee-30a5-4833-9ed3-78a20ca09dd9",
+      "name": "O'Reilly Media",
+      "contact_info": null
+    },
+    {
+      "id": "02b86ca8-e33a-4779-98e9-397a53371344",
+      "name": "Manning Publications",
+      "contact_info": null
+    },
+    {
+      "id": "f53ab91c-4f09-45f1-8ba3-2f522b4baea9",
+      "name": "Pegasus Yayınları",
+      "contact_info": null
+    },
+    {
+      "id": "5cce3208-d9a4-4e28-b036-f8b9228a4908",
+      "name": "Varlık Yayınları",
+      "contact_info": null
+    },
+    {
+      "id": "ded98e1f-ddf3-46fa-9730-77e8fd4a946b",
+      "name": "Altın Kitaplar",
+      "contact_info": null
+    },
+    {
+      "id": "f3488f5b-4efc-4da5-a39a-c30d726e67b2",
+      "name": "Okuyan Us Yayınevi",
+      "contact_info": null
+    },
+    {
+      "id": "01e2985b-fc14-4bd4-a70d-4c94b9318b7e",
+      "name": "Koridor Yayıncılık",
+      "contact_info": null
+    },
+    {
+      "id": "5a8d9b99-4242-44d2-954e-d09e926e5fe7",
+      "name": "Metropolis Kitap",
+      "contact_info": null
+    },
+    {
+      "id": "0e5c9be1-c1fe-41a7-8db5-d8ef14661d5c",
+      "name": "Domingo Yayınevi",
+      "contact_info": null
+    },
+    {
+      "id": "8048f46a-ad4b-43dc-a04a-212643faf098",
+      "name": "Kronik Kitap",
+      "contact_info": null
+    },
+    {
+      "id": "cbc062f3-29a4-44b2-966a-eaa82e7ee96a",
+      "name": "Türkiye İş Bankası Kültür Yayınları",
+      "contact_info": null
+    },
+    {
+      "id": "001239d5-0b4c-4935-97f5-529568aa342d",
+      "name": "Dergâh Yayınları",
+      "contact_info": null
+    },
+    {
+      "id": "d038d575-a574-42ec-94a0-d95e483d33e8",
+      "name": "Sel Yayıncılık",
+      "contact_info": null
+    },
+    {
+      "id": "5ed26cae-754b-4165-8e47-031e735b03cd",
+      "name": "Sarmal Yayınevi",
+      "contact_info": null
+    },
+    {
+      "id": "3e792aa0-924c-4ee7-9488-6b7d08ca285e",
+      "name": "Kırmızı Kedi Yayınevi",
+      "contact_info": null
+    }
+  ],
+  "authors": [
+    {
+      "id": "63df3993-709c-4c8e-8847-b2729feec710",
+      "first_name": "Fyodor",
+      "last_name": "Dostoyevski"
+    },
+    {
+      "id": "5a95b6c0-9fac-4d6f-9b12-28df61507c2e",
+      "first_name": "Sabahattin",
+      "last_name": "Ali"
+    },
+    {
+      "id": "2ed923ea-3e2c-4a96-8091-ed89caec87e1",
+      "first_name": "George",
+      "last_name": "Orwell"
+    },
+    {
+      "id": "d2d04775-fda8-440d-9505-e37fe8b146a4",
+      "first_name": "Ahmet Hamdi",
+      "last_name": "Tanpınar"
+    },
+    {
+      "id": "66e1bcd8-0cdc-4f2c-9a33-8458dafc1b18",
+      "first_name": "Stefan",
+      "last_name": "Zweig"
+    },
+    {
+      "id": "47bd4c69-a670-4b0e-987d-e626e275f656",
+      "first_name": "Yaşar",
+      "last_name": "Kemal"
+    },
+    {
+      "id": "1ff53bdf-29b3-4809-b26e-58c54582dccd",
+      "first_name": "Frank",
+      "last_name": "Herbert"
+    },
+    {
+      "id": "c6ebe227-bf27-4dc9-aecd-402e3906607e",
+      "first_name": "J.R.R.",
+      "last_name": "Tolkien"
+    },
+    {
+      "id": "5743991e-8da8-4319-8556-9c877e16b261",
+      "first_name": "Albert",
+      "last_name": "Camus"
+    },
+    {
+      "id": "1fbad5b1-98e9-4ad0-8e84-fbbf2c982f7e",
+      "first_name": "Victor",
+      "last_name": "Hugo"
+    },
+    {
+      "id": "79df9b3f-51ed-41ad-8c43-beea4d9fe8df",
+      "first_name": "Yuval Noah",
+      "last_name": "Harari"
+    },
+    {
+      "id": "2579e3a2-d857-408d-a81a-f6f1dbdf1e79",
+      "first_name": "Oğuz",
+      "last_name": "Atay"
+    },
+    {
+      "id": "7568c5c4-1ad8-4eac-b89b-93006c7b7f13",
+      "first_name": "Edith",
+      "last_name": "Oyhon"
+    },
+    {
+      "id": "13da37a7-f564-4437-92ed-13b476047b5e",
+      "first_name": "AHMET HAMDI",
+      "last_name": "TANPINAR"
+    },
+    {
+      "id": "654c1149-b739-41bc-ad79-62524b4ba3c4",
+      "first_name": "Murat",
+      "last_name": "Ozyasar"
+    },
+    {
+      "id": "89c805f5-9d9c-4d1a-9f12-4f3980c423fc",
+      "first_name": "Fiódor",
+      "last_name": "Dostoievski"
+    },
+    {
+      "id": "b1e3ddc3-ffff-4e1b-966a-76619b919533",
+      "first_name": "Oguz",
+      "last_name": "Atay"
+    },
+    {
+      "id": "3725eb72-d950-4bf7-a7d2-ddfe7a63b52c",
+      "first_name": "Paulo",
+      "last_name": "Coelho"
+    },
+    {
+      "id": "e5559816-6ba3-48f6-bd96-a080ea24b6e2",
+      "first_name": "Şeyma",
+      "last_name": "Subaşı"
+    },
+    {
+      "id": "92fbe0e7-0b40-459a-a377-718b6eaa7180",
+      "first_name": "Recep Tayyip",
+      "last_name": "Erdogan"
+    },
+    {
+      "id": "51961f05-7f48-488f-b8e8-b13f3b6c7bb0",
+      "first_name": "Robert C.",
+      "last_name": "Martin"
+    },
+    {
+      "id": "21e75d5b-966e-4532-ab76-f815929a0153",
+      "first_name": "Andrew",
+      "last_name": "Hunt"
+    },
+    {
+      "id": "e83eb748-cc9d-46fb-9c33-a9cc7781aa1b",
+      "first_name": "David",
+      "last_name": "Thomas"
+    },
+    {
+      "id": "5cae6745-2847-4e8f-88ad-10f0cd9e4e57",
+      "first_name": "Erich",
+      "last_name": "Gamma"
+    },
+    {
+      "id": "55dde5a3-b0f1-4e9d-9787-59e21ee9f01e",
+      "first_name": "Richard",
+      "last_name": "Helm"
+    },
+    {
+      "id": "6e666ecc-f16d-4c05-b4e6-bb4471ea0f8a",
+      "first_name": "Ralph",
+      "last_name": "Johnson"
+    },
+    {
+      "id": "a375f94b-dd88-4b38-b9d7-432b212cacbc",
+      "first_name": "John",
+      "last_name": "Vlissides"
+    },
+    {
+      "id": "08b03335-8412-4fee-bfa5-9722d73fd0f7",
+      "first_name": "Thomas H.",
+      "last_name": "Cormen"
+    },
+    {
+      "id": "8ff522c4-01c0-4788-818f-ca4df50206c5",
+      "first_name": "Charles E.",
+      "last_name": "Leiserson"
+    },
+    {
+      "id": "0026e4de-39d9-45d7-a189-bc8a3aca268c",
+      "first_name": "Ronald L.",
+      "last_name": "Rivest"
+    },
+    {
+      "id": "6ba20a8f-3a7c-4843-bfc4-9a948c5bb781",
+      "first_name": "Clifford",
+      "last_name": "Stein"
+    },
+    {
+      "id": "759ee8c9-a18a-4889-a849-fde1525d8d8f",
+      "first_name": "Martin",
+      "last_name": "Fowler"
+    },
+    {
+      "id": "d3ba560a-03f4-4d9a-a6a8-9de42909efcd",
+      "first_name": "Douglas",
+      "last_name": "Crockford"
+    },
+    {
+      "id": "be65ee6d-d8e1-41a6-aadf-6bf504e11c08",
+      "first_name": "Frederick P.",
+      "last_name": "Brooks"
+    },
+    {
+      "id": "096b49a5-bf15-49bd-ba4a-992757b9427f",
+      "first_name": "François",
+      "last_name": "Chollet"
+    },
+    {
+      "id": "f451f616-4b2b-4520-9711-645cc96ec24e",
+      "first_name": "James",
+      "last_name": "Clear"
+    },
+    {
+      "id": "77b31662-72b2-4a20-b662-31bcf244d496",
+      "first_name": "Stephen R.",
+      "last_name": "Covey"
+    },
+    {
+      "id": "dc44d111-e697-418a-9fc2-33ed3a16d58c",
+      "first_name": "Napoleon",
+      "last_name": "Hill"
+    },
+    {
+      "id": "7aa960ba-ee7b-4b4c-86c5-1e97d2c4f9d1",
+      "first_name": "Viktor E.",
+      "last_name": "Frankl"
+    },
+    {
+      "id": "78e96303-a476-4be5-8f0e-d2c86788b208",
+      "first_name": "Joseph",
+      "last_name": "Murphy"
+    },
+    {
+      "id": "cb526419-50fc-49ce-81d9-c6d0d8ea8286",
+      "first_name": "Cal",
+      "last_name": "Newport"
+    },
+    {
+      "id": "aa6cce0c-cf61-4720-8db2-ece4eac6fe20",
+      "first_name": "Walter",
+      "last_name": "Isaacson"
+    },
+    {
+      "id": "02499418-298c-4116-95ed-62ca2f7836bd",
+      "first_name": "Ashlee",
+      "last_name": "Vance"
+    },
+    {
+      "id": "42958b9f-e207-4041-afbc-b5737223a6ab",
+      "first_name": "Sylvia",
+      "last_name": "Nasar"
+    },
+    {
+      "id": "df5a82e4-6aa4-4c21-b3ec-cac0e01715d2",
+      "first_name": "İhsan Oktay",
+      "last_name": "Anar"
+    },
+    {
+      "id": "47a276b0-ec5b-4814-9eb3-571dbda83213",
+      "first_name": "Orhan",
+      "last_name": "Pamuk"
+    },
+    {
+      "id": "71abb62d-f6a9-48a8-8171-da5381e98772",
+      "first_name": "Yusuf",
+      "last_name": "Atılgan"
+    },
+    {
+      "id": "b8a10291-e301-4345-bf8a-88268579a7d5",
+      "first_name": "Nâzım",
+      "last_name": "Hikmet"
+    },
+    {
+      "id": "8f77a1f6-9d25-440b-89d6-ecc46dbe8f3a",
+      "first_name": "Franz",
+      "last_name": "Kafka"
+    },
+    {
+      "id": "9ac96118-2392-4e86-ac8c-1233a5c5cf5b",
+      "first_name": "Ray",
+      "last_name": "Bradbury"
+    },
+    {
+      "id": "9e612bcd-e1ac-4f5b-9a55-7b985a8285fc",
+      "first_name": "Gabriel García",
+      "last_name": "Márquez"
+    },
+    {
+      "id": "576822b7-eba8-4b46-a6ff-573c9711025b",
+      "first_name": "Aldous",
+      "last_name": "Huxley"
+    },
+    {
+      "id": "9043b698-dc7a-4305-b300-d3672a7a8742",
+      "first_name": "Harper",
+      "last_name": "Lee"
+    },
+    {
+      "id": "7d907b8f-bc42-4241-84dd-9110a8b5e998",
+      "first_name": "Douglas",
+      "last_name": "Adams"
+    },
+    {
+      "id": "7f42d3e7-cd6a-4c87-819a-2ca01faa2ebe",
+      "first_name": "José",
+      "last_name": "Saramago"
+    }
+  ],
+  "categories": [
+    {
+      "id": 5,
+      "name": "Dünya Klasikleri"
+    },
+    {
+      "id": 6,
+      "name": "Türk Edebiyatı"
+    },
+    {
+      "id": 7,
+      "name": "Roman"
+    },
+    {
+      "id": 8,
+      "name": "Bilim Kurgu & Distopya"
+    },
+    {
+      "id": 9,
+      "name": "Fantastik"
+    },
+    {
+      "id": 10,
+      "name": "Psikoloji & Felsefe"
+    },
+    {
+      "id": 11,
+      "name": "Tarih & Toplum"
+    },
+    {
+      "id": 12,
+      "name": "Yazılım & Teknoloji"
+    },
+    {
+      "id": 13,
+      "name": "futurology"
+    },
+    {
+      "id": 14,
+      "name": "censorship"
+    },
+    {
+      "id": 15,
+      "name": "surveillance"
+    },
+    {
+      "id": 16,
+      "name": "rebels"
+    },
+    {
+      "id": 17,
+      "name": "sting operations"
+    },
+    {
+      "id": 18,
+      "name": "Dune (Imaginary place)"
+    },
+    {
+      "id": 19,
+      "name": "Fiction"
+    },
+    {
+      "id": 20,
+      "name": "Fiction, science fiction, general"
+    },
+    {
+      "id": 21,
+      "name": "Dune (imaginary place), fiction"
+    },
+    {
+      "id": 22,
+      "name": "New York Times reviewed"
+    },
+    {
+      "id": 23,
+      "name": "political satire"
+    },
+    {
+      "id": 24,
+      "name": "classic"
+    },
+    {
+      "id": 25,
+      "name": "animal drama"
+    },
+    {
+      "id": 26,
+      "name": "Fiction, political"
+    },
+    {
+      "id": 27,
+      "name": "Church buildings"
+    },
+    {
+      "id": 28,
+      "name": "Church history"
+    },
+    {
+      "id": 29,
+      "name": "Chess"
+    },
+    {
+      "id": 30,
+      "name": "Chrestomathies and readers"
+    },
+    {
+      "id": 31,
+      "name": "German language"
+    },
+    {
+      "id": 32,
+      "name": "Readers"
+    },
+    {
+      "id": 33,
+      "name": "Turkish fiction"
+    },
+    {
+      "id": 34,
+      "name": "Roman turc"
+    },
+    {
+      "id": 35,
+      "name": "18.84 Turkish language and/or literature"
+    },
+    {
+      "id": 36,
+      "name": "Kişisel Gelişim"
+    },
+    {
+      "id": 37,
+      "name": "Dram"
+    },
+    {
+      "id": 38,
+      "name": "Siyaset"
+    },
+    {
+      "id": 39,
+      "name": "Biyografi & Otobiyografi"
+    }
+  ],
+  "books": [
+    {
+      "id": "f786a97a-3cc6-42bb-bea4-25cec83a0f00",
+      "title": "1984",
+      "isbn": "978-9750718533",
+      "publisher_id": "ec208bed-aece-44bb-98b4-77c78a2efa2e",
+      "published_year": 2019,
+      "stock_count": 4,
+      "cover_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQCrkWFSjPYZl-Bz555nulYMLwC1AvOedJRRnAlL6MeFQ&s=10",
+      "author_ids": [
+        "2ed923ea-3e2c-4a96-8091-ed89caec87e1"
+      ],
+      "category_ids": [
+        13,
+        14,
+        15,
+        16,
+        17
+      ]
+    },
+    {
+      "id": "6319df5c-b44f-4755-a28b-a08d48d2aaf8",
+      "title": "Hayvan Çiftliği",
+      "isbn": "978-975-07-19387",
+      "publisher_id": "ec208bed-aece-44bb-98b4-77c78a2efa2e",
+      "published_year": 2001,
+      "stock_count": 6,
+      "cover_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTjLWNUMb2vqFVzo4zOfTtFbUUGxrch42tPuA3QaAIwFw&s=10",
+      "author_ids": [
+        "2ed923ea-3e2c-4a96-8091-ed89caec87e1"
+      ],
+      "category_ids": [
+        23,
+        24,
+        25,
+        26
+      ]
+    },
+    {
+      "id": "62c41ceb-49b6-416d-b976-0be94c43a6a3",
+      "title": "Sefiller",
+      "isbn": "978-605-332-4744",
+      "publisher_id": "d4e9a377-e214-4447-b2bd-5cdbe5dd80a0",
+      "published_year": 2016,
+      "stock_count": 3,
+      "cover_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQhNz8zc229vQGvMzgfVT_juH6AyuSzbocgOiyQCU4NWg&s=10",
+      "author_ids": [
+        "1fbad5b1-98e9-4ad0-8e84-fbbf2c982f7e"
+      ],
+      "category_ids": [
+        5,
+        7,
+        11
+      ]
+    },
+    {
+      "id": "3288d87a-4c8d-4501-89e5-58bb60801b10",
+      "title": "Aylak Adam",
+      "isbn": "978-975-08-1335-1",
+      "publisher_id": "8e8e5205-b2ed-4ef4-a358-3388b3043bfa",
+      "published_year": 1959,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/id/12308941-L.jpg",
+      "author_ids": [
+        "71abb62d-f6a9-48a8-8171-da5381e98772"
+      ],
+      "category_ids": [
+        6,
+        7,
+        10
+      ]
+    },
+    {
+      "id": "d9e974f4-658f-4fc9-9b3c-0236cececcee",
+      "title": "Clean Code: A Handbook of Agile Software Craftsmanship",
+      "isbn": "978-0-13-235088-4",
+      "publisher_id": "44ed735f-19d0-4466-8339-54979c8355b2",
+      "published_year": 2008,
+      "stock_count": 8,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg",
+      "author_ids": [
+        "51961f05-7f48-488f-b8e8-b13f3b6c7bb0"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "33672c13-d536-40ba-8f39-c2c08a98fb65",
+      "title": "The Pragmatic Programmer: Your Journey to Mastery",
+      "isbn": "978-0-20-161622-4",
+      "publisher_id": "3c670c3b-200b-40ba-a396-f5b5437d4270",
+      "published_year": 1999,
+      "stock_count": 1,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780201616224-L.jpg",
+      "author_ids": [
+        "e83eb748-cc9d-46fb-9c33-a9cc7781aa1b",
+        "21e75d5b-966e-4532-ab76-f815929a0153"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "cacab0a3-ce95-4205-b03f-66890e0d857c",
+      "title": "Design Patterns: Elements of Reusable Object-Oriented Software",
+      "isbn": "978-0-20-163361-0",
+      "publisher_id": "3c670c3b-200b-40ba-a396-f5b5437d4270",
+      "published_year": 1994,
+      "stock_count": 2,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780201633610-L.jpg",
+      "author_ids": [
+        "5cae6745-2847-4e8f-88ad-10f0cd9e4e57",
+        "6e666ecc-f16d-4c05-b4e6-bb4471ea0f8a",
+        "55dde5a3-b0f1-4e9d-9787-59e21ee9f01e",
+        "a375f94b-dd88-4b38-b9d7-432b212cacbc"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "2eb9b929-6a4b-4771-826c-889cf4ecb675",
+      "title": "Introduction to Algorithms",
+      "isbn": "978-0-26-203384-8",
+      "publisher_id": "bcdb91ff-7c2c-4fd2-a3c3-a075126e629a",
+      "published_year": 2009,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780262033848-L.jpg",
+      "author_ids": [
+        "0026e4de-39d9-45d7-a189-bc8a3aca268c",
+        "08b03335-8412-4fee-bfa5-9722d73fd0f7",
+        "8ff522c4-01c0-4788-818f-ca4df50206c5",
+        "6ba20a8f-3a7c-4843-bfc4-9a948c5bb781"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "9cdc5258-c791-49e2-abd0-2ffc52522c5f",
+      "title": "Refactoring: Improving the Design of Existing Code",
+      "isbn": "978-0-13-475759-9",
+      "publisher_id": "3c670c3b-200b-40ba-a396-f5b5437d4270",
+      "published_year": 2018,
+      "stock_count": 4,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780134757599-L.jpg",
+      "author_ids": [
+        "759ee8c9-a18a-4889-a849-fde1525d8d8f"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "85eba542-ac17-4f41-9931-4a00bed2e883",
+      "title": "JavaScript: The Good Parts",
+      "isbn": "978-0-59-651774-8",
+      "publisher_id": "215d88ee-30a5-4833-9ed3-78a20ca09dd9",
+      "published_year": 2008,
+      "stock_count": 10,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780596517748-L.jpg",
+      "author_ids": [
+        "d3ba560a-03f4-4d9a-a6a8-9de42909efcd"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "838d451e-da2d-48b7-a546-806647488e56",
+      "title": "The Mythical Man-Month: Essays on Software Engineering",
+      "isbn": "978-0-20-183595-3",
+      "publisher_id": "3c670c3b-200b-40ba-a396-f5b5437d4270",
+      "published_year": 1995,
+      "stock_count": 4,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780201835953-L.jpg",
+      "author_ids": [
+        "be65ee6d-d8e1-41a6-aadf-6bf504e11c08"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "fe8ab347-bb44-4f9c-b452-213b8a71d43f",
+      "title": "Deep Learning with Python",
+      "isbn": "978-1-61-729443-3",
+      "publisher_id": "02b86ca8-e33a-4779-98e9-397a53371344",
+      "published_year": 2017,
+      "stock_count": 6,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9781617294433-L.jpg",
+      "author_ids": [
+        "096b49a5-bf15-49bd-ba4a-992757b9427f"
+      ],
+      "category_ids": [
+        12
+      ]
+    },
+    {
+      "id": "3fa10aeb-9a55-4c21-8581-62c9031483ac",
+      "title": "Atomik Alışkanlıklar",
+      "isbn": "978-605-299-838-0",
+      "publisher_id": "f53ab91c-4f09-45f1-8ba3-2f522b4baea9",
+      "published_year": 2018,
+      "stock_count": 4,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9786052998380-L.jpg",
+      "author_ids": [
+        "f451f616-4b2b-4520-9711-645cc96ec24e"
+      ],
+      "category_ids": [
+        36,
+        10
+      ]
+    },
+    {
+      "id": "942bf501-3a06-48f0-81bf-dac607618bde",
+      "title": "Etkili İnsanların 7 Alışkanlığı",
+      "isbn": "978-975-434-195-9",
+      "publisher_id": "5cce3208-d9a4-4e28-b036-f8b9228a4908",
+      "published_year": 1989,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780743269513-L.jpg",
+      "author_ids": [
+        "77b31662-72b2-4a20-b662-31bcf244d496"
+      ],
+      "category_ids": [
+        36
+      ]
+    },
+    {
+      "id": "b0579fbb-3773-4122-b816-1a03ec293ad1",
+      "title": "Düşün ve Zengin Ol",
+      "isbn": "978-975-21-0348-1",
+      "publisher_id": "ded98e1f-ddf3-46fa-9730-77e8fd4a946b",
+      "published_year": 1937,
+      "stock_count": 0,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9781585424337-L.jpg",
+      "author_ids": [
+        "dc44d111-e697-418a-9fc2-33ed3a16d58c"
+      ],
+      "category_ids": [
+        36
+      ]
+    },
+    {
+      "id": "0d384c88-d063-4ce6-9f72-aaccca67a236",
+      "title": "İnsanın Anlam Arayışı",
+      "isbn": "978-605-405-423-7",
+      "publisher_id": "f3488f5b-4efc-4da5-a39a-c30d726e67b2",
+      "published_year": 1946,
+      "stock_count": 9,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780807014295-L.jpg",
+      "author_ids": [
+        "7aa960ba-ee7b-4b4c-86c5-1e97d2c4f9d1"
+      ],
+      "category_ids": [
+        36,
+        10
+      ]
+    },
+    {
+      "id": "71685d51-9bc4-440a-b667-df5bd48a4622",
+      "title": "Bilinçaltının Gücü",
+      "isbn": "978-605-418-802-4",
+      "publisher_id": "01e2985b-fc14-4bd4-a70d-4c94b9318b7e",
+      "published_year": 1963,
+      "stock_count": 10,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780735204553-L.jpg",
+      "author_ids": [
+        "78e96303-a476-4be5-8f0e-d2c86788b208"
+      ],
+      "category_ids": [
+        36,
+        10
+      ]
+    },
+    {
+      "id": "f9271f57-76d0-4f31-a9db-45fbeb7f4b73",
+      "title": "Pürdikkat: Odaklanma Becerisini Nasıl Yitirdik?",
+      "isbn": "978-605-671-192-3",
+      "publisher_id": "5a8d9b99-4242-44d2-954e-d09e926e5fe7",
+      "published_year": 2017,
+      "stock_count": 2,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9781455586691-L.jpg",
+      "author_ids": [
+        "cb526419-50fc-49ce-81d9-c6d0d8ea8286"
+      ],
+      "category_ids": [
+        36,
+        12
+      ]
+    },
+    {
+      "id": "b950f8c1-a86f-46db-89bf-85fcc9d0daf4",
+      "title": "Steve Jobs",
+      "isbn": "978-605-615-555-0",
+      "publisher_id": "0e5c9be1-c1fe-41a7-8db5-d8ef14661d5c",
+      "published_year": 2011,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9781451648539-L.jpg",
+      "author_ids": [
+        "aa6cce0c-cf61-4720-8db2-ece4eac6fe20"
+      ],
+      "category_ids": [
+        39,
+        12
+      ]
+    },
+    {
+      "id": "44b90013-99ea-433f-85ee-0e4279c2540c",
+      "title": "Dune",
+      "isbn": "978-605-375-4794",
+      "publisher_id": "ea8cdaa8-c728-468e-b268-0e68233f9b2b",
+      "published_year": 2015,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/id/12227029-L.jpg",
+      "author_ids": [
+        "1ff53bdf-29b3-4809-b26e-58c54582dccd"
+      ],
+      "category_ids": [
+        18,
+        19,
+        20,
+        21,
+        22
+      ]
+    },
+    {
+      "id": "c1739db8-9c57-417e-8e77-9b40ed0bdafc",
+      "title": "Huzur",
+      "isbn": "978-975-99-5577-9",
+      "publisher_id": "001239d5-0b4c-4935-97f5-529568aa342d",
+      "published_year": 1949,
+      "stock_count": 3,
+      "cover_url": "https://covers.openlibrary.org/b/id/12354821-L.jpg",
+      "author_ids": [
+        "d2d04775-fda8-440d-9505-e37fe8b146a4"
+      ],
+      "category_ids": [
+        6,
+        7
+      ]
+    },
+    {
+      "id": "5b633cef-ac7e-4da0-a4f8-007eb09c2a4c",
+      "title": "Kürk Mantolu Madonna",
+      "isbn": "978-975-363-8029",
+      "publisher_id": "8e8e5205-b2ed-4ef4-a358-3388b3043bfa",
+      "published_year": 2022,
+      "stock_count": 7,
+      "cover_url": "https://covers.openlibrary.org/b/id/13315465-L.jpg",
+      "author_ids": [
+        "5a95b6c0-9fac-4d6f-9b12-28df61507c2e"
+      ],
+      "category_ids": [
+        6,
+        7
+      ]
+    },
+    {
+      "id": "04a98b39-9d95-438a-8809-834c42b1fc15",
+      "title": "Satranc",
+      "isbn": "978-605-360-6116",
+      "publisher_id": "6baba694-f847-4374-9ea0-d7dd1aa7b3dc",
+      "published_year": 2012,
+      "stock_count": 8,
+      "cover_url": "https://covers.openlibrary.org/b/id/12226114-L.jpg",
+      "author_ids": [
+        "66e1bcd8-0cdc-4f2c-9a33-8458dafc1b18"
+      ],
+      "category_ids": [
+        19,
+        29,
+        30,
+        31,
+        32
+      ]
+    },
+    {
+      "id": "479ed0db-d0c3-43eb-898e-3d1a0202660f",
+      "title": "Yüzüklerin Efendisi 1",
+      "isbn": "9789753425988",
+      "publisher_id": "d0709d70-63a5-4553-9f3c-35d968b7a37a",
+      "published_year": 2016,
+      "stock_count": 1,
+      "cover_url": "https://covers.openlibrary.org/b/id/12308941-L.jpg",
+      "author_ids": [
+        "c6ebe227-bf27-4dc9-aecd-402e3906607e"
+      ],
+      "category_ids": [
+        9,
+        7
+      ]
+    },
+    {
+      "id": "0052775f-4985-468d-8272-efdcdfee9416",
+      "title": "Ince Memed I.",
+      "isbn": "978-975-08-07145",
+      "publisher_id": "2dc10d46-3081-4b9f-b83f-9dafabed0dc1",
+      "published_year": 2004,
+      "stock_count": 4,
+      "cover_url": "https://covers.openlibrary.org/b/id/10217552-L.jpg",
+      "author_ids": [
+        "47bd4c69-a670-4b0e-987d-e626e275f656"
+      ],
+      "category_ids": [
+        6,
+        7
+      ]
+    },
+    {
+      "id": "c8f2536d-bb03-4a5c-be11-c93f6deb7ce3",
+      "title": "Kuyucakli Yusuf",
+      "isbn": "9786257999281",
+      "publisher_id": "3ae15750-5f88-47c6-9f6e-0a4de8ea5cef",
+      "published_year": 2019,
+      "stock_count": 4,
+      "cover_url": "https://covers.openlibrary.org/b/id/12272176-L.jpg",
+      "author_ids": [
+        "5a95b6c0-9fac-4d6f-9b12-28df61507c2e"
+      ],
+      "category_ids": [
+        27,
+        28
+      ]
+    },
+    {
+      "id": "ced90af6-3bfb-4048-a685-0169568070b9",
+      "title": "Yabanci",
+      "isbn": "9789750748677",
+      "publisher_id": "0e9507ef-949d-4dd9-88d3-27ee4550d7fb",
+      "published_year": 2015,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/id/13211328-L.jpg",
+      "author_ids": [
+        "654c1149-b739-41bc-ad79-62524b4ba3c4"
+      ],
+      "category_ids": [
+        11,
+        10
+      ]
+    },
+    {
+      "id": "3754f961-511c-4d3d-922a-2c270ef6fad8",
+      "title": "Simyacı",
+      "isbn": "978-975-07-2643-9",
+      "publisher_id": "ec208bed-aece-44bb-98b4-77c78a2efa2e",
+      "published_year": 2016,
+      "stock_count": 5,
+      "cover_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS6zpcMTnwgLpLqToOp89ejVgM-bWnh8Gqa0FlOd2J5xw&s=10",
+      "author_ids": [
+        "3725eb72-d950-4bf7-a7d2-ddfe7a63b52c"
+      ],
+      "category_ids": [
+        5,
+        10
+      ]
+    },
+    {
+      "id": "6454462b-914f-46e1-b82b-4f7e3c975e12",
+      "title": "Tutunamayanlar",
+      "isbn": "978-975-470-011-4",
+      "publisher_id": "4bb7e329-591b-4dae-a488-8ba0b41bd136",
+      "published_year": 1992,
+      "stock_count": 0,
+      "cover_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTCqfHXHej-tqPqTyZ-iIyRRzbxjVWs03Cgu7r1u86MJQ&s",
+      "author_ids": [
+        "b1e3ddc3-ffff-4e1b-966a-76619b919533"
+      ],
+      "category_ids": [
+        33,
+        34,
+        35
+      ]
+    },
+    {
+      "id": "8109dc8b-2501-4737-8a0a-c4e5d22b1a2a",
+      "title": "Elon Musk: Tesla, SpaceX ve Muhteşem Geleceğin Peşinde",
+      "isbn": "978-605-998-064-7",
+      "publisher_id": "8048f46a-ad4b-43dc-a04a-212643faf098",
+      "published_year": 2015,
+      "stock_count": 8,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780062301239-L.jpg",
+      "author_ids": [
+        "02499418-298c-4116-95ed-62ca2f7836bd"
+      ],
+      "category_ids": [
+        39,
+        12
+      ]
+    },
+    {
+      "id": "d8d2d37b-2329-4cc3-bdd0-90d6e7503e11",
+      "title": "Bir Bilim Adamının Romanı",
+      "isbn": "978-975-47-0007-7",
+      "publisher_id": "45474318-5ceb-41f8-86ee-fd0c28ea41c3",
+      "published_year": 1975,
+      "stock_count": 6,
+      "cover_url": "https://covers.openlibrary.org/b/id/11149794-L.jpg",
+      "author_ids": [
+        "2579e3a2-d857-408d-a81a-f6f1dbdf1e79"
+      ],
+      "category_ids": [
+        39,
+        6
+      ]
+    },
+    {
+      "id": "d4802004-236b-40ce-8503-830835451d06",
+      "title": "Leonardo da Vinci",
+      "isbn": "978-605-19-8038-6",
+      "publisher_id": "0e5c9be1-c1fe-41a7-8db5-d8ef14661d5c",
+      "published_year": 2017,
+      "stock_count": 1,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9781501139154-L.jpg",
+      "author_ids": [
+        "aa6cce0c-cf61-4720-8db2-ece4eac6fe20"
+      ],
+      "category_ids": [
+        39,
+        11
+      ]
+    },
+    {
+      "id": "6d081673-32aa-4950-b965-1a8d38231da2",
+      "title": "Akıl Oyunları",
+      "isbn": "978-975-21-0214-9",
+      "publisher_id": "ded98e1f-ddf3-46fa-9730-77e8fd4a946b",
+      "published_year": 1998,
+      "stock_count": 3,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780684819068-L.jpg",
+      "author_ids": [
+        "42958b9f-e207-4041-afbc-b5737223a6ab"
+      ],
+      "category_ids": [
+        39
+      ]
+    },
+    {
+      "id": "3ad6c512-3eed-43e3-a0b5-06368e038500",
+      "title": "Kendi Hayatının Şiirini Yazanlar",
+      "isbn": "978-605-33-2506-2",
+      "publisher_id": "cbc062f3-29a4-44b2-966a-eaa82e7ee96a",
+      "published_year": 1928,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/id/8231990-L.jpg",
+      "author_ids": [
+        "66e1bcd8-0cdc-4f2c-9a33-8458dafc1b18"
+      ],
+      "category_ids": [
+        39,
+        5
+      ]
+    },
+    {
+      "id": "2f6c300e-2adf-4595-94a3-47933932fbf9",
+      "title": "Puslu Kıtalar Atlası",
+      "isbn": "978-975-47-0472-3",
+      "publisher_id": "45474318-5ceb-41f8-86ee-fd0c28ea41c3",
+      "published_year": 1995,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/id/12832960-L.jpg",
+      "author_ids": [
+        "df5a82e4-6aa4-4c21-b3ec-cac0e01715d2"
+      ],
+      "category_ids": [
+        6,
+        7,
+        9
+      ]
+    },
+    {
+      "id": "3636b3a9-93e0-498e-bdef-9b0b841a801a",
+      "title": "Beyaz Kale",
+      "isbn": "978-975-47-0455-6",
+      "publisher_id": "45474318-5ceb-41f8-86ee-fd0c28ea41c3",
+      "published_year": 1985,
+      "stock_count": 9,
+      "cover_url": "https://covers.openlibrary.org/b/id/10543306-L.jpg",
+      "author_ids": [
+        "47a276b0-ec5b-4814-9eb3-571dbda83213"
+      ],
+      "category_ids": [
+        6,
+        7,
+        11
+      ]
+    },
+    {
+      "id": "75f88188-2c08-4029-ae88-7eac4bfe7163",
+      "title": "Memleketimden İnsan Manzaraları",
+      "isbn": "978-975-08-0447-2",
+      "publisher_id": "8e8e5205-b2ed-4ef4-a358-3388b3043bfa",
+      "published_year": 2002,
+      "stock_count": 0,
+      "cover_url": "https://covers.openlibrary.org/b/id/10217552-L.jpg",
+      "author_ids": [
+        "b8a10291-e301-4345-bf8a-88268579a7d5"
+      ],
+      "category_ids": [
+        6
+      ]
+    },
+    {
+      "id": "d6ae5ff7-41a7-4d07-bd00-2e36b025e043",
+      "title": "Dönüşüm",
+      "isbn": "978-605-36-0930-8",
+      "publisher_id": "cbc062f3-29a4-44b2-966a-eaa82e7ee96a",
+      "published_year": 1915,
+      "stock_count": 2,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780143105244-L.jpg",
+      "author_ids": [
+        "8f77a1f6-9d25-440b-89d6-ecc46dbe8f3a"
+      ],
+      "category_ids": [
+        5,
+        7,
+        10
+      ]
+    },
+    {
+      "id": "e0537836-de71-4820-bf9e-1e3b005ba389",
+      "title": "Fahrenheit 451",
+      "isbn": "978-605-37-5781-8",
+      "publisher_id": "617bd1a4-0cb8-4f88-8489-9f64f9b0aeab",
+      "published_year": 1953,
+      "stock_count": 5,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9786053757818-L.jpg",
+      "author_ids": [
+        "9ac96118-2392-4e86-ac8c-1233a5c5cf5b"
+      ],
+      "category_ids": [
+        8,
+        5
+      ]
+    },
+    {
+      "id": "edf2949f-fbe0-438f-bd3d-9cb24a085a46",
+      "title": "Yüzyıllık Yalnızlık",
+      "isbn": "978-975-07-1936-3",
+      "publisher_id": "ec208bed-aece-44bb-98b4-77c78a2efa2e",
+      "published_year": 1967,
+      "stock_count": 4,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9789750719363-L.jpg",
+      "author_ids": [
+        "9e612bcd-e1ac-4f5b-9a55-7b985a8285fc"
+      ],
+      "category_ids": [
+        5,
+        7
+      ]
+    },
+    {
+      "id": "7153ce93-06bc-4fb1-8c8a-db77751e4afe",
+      "title": "Cesur Yeni Dünya",
+      "isbn": "978-975-69-0216-5",
+      "publisher_id": "617bd1a4-0cb8-4f88-8489-9f64f9b0aeab",
+      "published_year": 1932,
+      "stock_count": 3,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780060850524-L.jpg",
+      "author_ids": [
+        "576822b7-eba8-4b46-a6ff-573c9711025b"
+      ],
+      "category_ids": [
+        8,
+        5
+      ]
+    },
+    {
+      "id": "6fa5a794-4a78-43bf-a701-b2d6bedcb30f",
+      "title": "Karamazov Kardeşler",
+      "isbn": "978-605-36-0987-2",
+      "publisher_id": "cbc062f3-29a4-44b2-966a-eaa82e7ee96a",
+      "published_year": 1880,
+      "stock_count": 6,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780374528379-L.jpg",
+      "author_ids": [
+        "63df3993-709c-4c8e-8847-b2729feec710"
+      ],
+      "category_ids": [
+        5,
+        7,
+        10
+      ]
+    },
+    {
+      "id": "a6512125-c3f4-4146-9f42-bc1fad174413",
+      "title": "Bülbülü Öldürmek",
+      "isbn": "978-975-57-0701-3",
+      "publisher_id": "d038d575-a574-42ec-94a0-d95e483d33e8",
+      "published_year": 1960,
+      "stock_count": 2,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780060935467-L.jpg",
+      "author_ids": [
+        "9043b698-dc7a-4305-b300-d3672a7a8742"
+      ],
+      "category_ids": [
+        5,
+        7
+      ]
+    },
+    {
+      "id": "1eb556db-b715-4ed0-bd20-9c1c0bd3fdcb",
+      "title": "Otostopçunun Galaksi Rehberi",
+      "isbn": "978-975-73-8096-2",
+      "publisher_id": "5ed26cae-754b-4165-8e47-031e735b03cd",
+      "published_year": 1979,
+      "stock_count": 10,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780345391803-L.jpg",
+      "author_ids": [
+        "7d907b8f-bc42-4241-84dd-9110a8b5e998"
+      ],
+      "category_ids": [
+        8
+      ]
+    },
+    {
+      "id": "0cd578c0-3007-49d1-991b-3d4678f5b2e9",
+      "title": "Suç ve Ceza",
+      "isbn": "9789754589023",
+      "publisher_id": "a8572280-4f33-402b-be68-fdd04b70c5ba",
+      "published_year": 2016,
+      "stock_count": 1,
+      "cover_url": "https://covers.openlibrary.org/b/id/10736127-L.jpg",
+      "author_ids": [
+        "89c805f5-9d9c-4d1a-9f12-4f3980c423fc"
+      ],
+      "category_ids": [
+        5,
+        7,
+        10
+      ]
+    },
+    {
+      "id": "0f425f7a-e95c-4797-bc16-1b20ac1e5146",
+      "title": "Körlük",
+      "isbn": "978-605-29-8135-1",
+      "publisher_id": "3e792aa0-924c-4ee7-9488-6b7d08ca285e",
+      "published_year": 1995,
+      "stock_count": 0,
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780156007757-L.jpg",
+      "author_ids": [
+        "7f42d3e7-cd6a-4c87-819a-2ca01faa2ebe"
+      ],
+      "category_ids": [
+        5,
+        7,
+        10
+      ]
+    },
+    {
+      "id": "5c9213a9-3526-410e-9307-4ad615e6e756",
+      "title": "SAATLERİ AYARLAMA ENSTITUSU",
+      "isbn": "978-975-995-5762",
+      "publisher_id": "5987ccbe-7939-4d37-b320-eab233bfbf5c",
+      "published_year": 2016,
+      "stock_count": 3,
+      "cover_url": "https://covers.openlibrary.org/b/id/12354821-L.jpg",
+      "author_ids": [
+        "13da37a7-f564-4437-92ed-13b476047b5e"
+      ],
+      "category_ids": [
+        6,
+        7
+      ]
+    }
+  ]
+}

@@ -1,13 +1,39 @@
+# Ortam Değişkenleri ve Gizli Anahtarlar
 .env
-__pycache__/
-*.py[cod]
+.env.*
+!.env.example
+
+# Python & Sanal Ortamlar
 .venv/
 venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.idea/
-.vscode/
+.coverage
+htmlcov/
+*.log
+
+# Node.js & Frontend Derleme Çıktıları
 node_modules/
 dist/
+dist-ssr/
+*.local
+
+# IDE ve Editör Dosyaları
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# Arşivler (teslim zip dosyası git'te tutulmaz)
 *.zip
+*.tar.gz
+
+# Veritabanı ve Tohum (Seed) İstisnaları - Mutlaka GitHub'a dahil edilsin
+!backend/app/initial_data.json

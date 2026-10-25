@@ -38,9 +38,18 @@ async def _periodic_reservation_and_overdue_sync() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if not getattr(_app.state, "testing", False):
+        try:
+            from app.seed_cloud import seed_cloud
+            seed_cloud()
+        except Exception as e:
+            logger.warning(f"Otomatik şema ve tohumlama sırasında hata: {e}")
+
     sync_task = None
     if not getattr(_app.state, "testing", False):
-        sync_task = asyncio.create_task(_periodic_reservation_and_overdue_sync())
+        import os
+        if not os.getenv("VERCEL"):
+            sync_task = asyncio.create_task(_periodic_reservation_and_overdue_sync())
 
     try:
         yield
@@ -112,6 +121,7 @@ Korumalı endpoint'lere erişmek için **Authorize** butonunu kullanarak `/api/v
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.hf\.space|http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

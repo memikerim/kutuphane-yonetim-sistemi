@@ -10,8 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Hem yerel (8000) hem de Hugging Face Spaces (7860) portlarını bildir
+EXPOSE 7860 8000
 
-# Önce migration'ları uygula, sonra API'yi başlat
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
-
+# Veritabanı şemasını güncelle (Alembic), başlangıç verilerini yükle (Seed) ve FastAPI'yi başlat
+CMD ["sh", "-c", "alembic upgrade head && python -m app.seed_cloud && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
