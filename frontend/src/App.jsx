@@ -176,41 +176,6 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Toast Notifications Container */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full px-4 sm:px-0 pointer-events-none">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-xl border backdrop-blur-md transition-all ${
-              t.type === 'success'
-                ? 'bg-emerald-950/95 text-emerald-50 border-emerald-700'
-                : t.type === 'error'
-                ? 'bg-rose-950/95 text-rose-50 border-rose-700'
-                : 'bg-slate-900/95 text-white border-slate-700'
-            }`}
-          >
-            {t.type === 'success' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-            ) : t.type === 'error' ? (
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-            ) : (
-              <Info className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-            )}
-            <div className="flex-1 text-xs sm:text-sm font-medium leading-snug">
-              {t.message}
-            </div>
-            <button
-              onClick={() =>
-                setToasts((prev) => prev.filter((item) => item.id !== t.id))
-              }
-              className="text-white/60 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        ))}
-      </div>
-
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'catalog' && (
@@ -708,6 +673,41 @@ export default function App() {
           notify={notify}
         />
       )}
+
+      {/* Yüksek Öncelikli ve Net Görünürlüklü Toast Bildirimleri (Tüm pencerelerin ve modalların en üstünde) */}
+      <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2.5 max-w-sm w-full px-4 sm:px-0 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl border transition-all animate-in fade-in slide-in-from-bottom-3 duration-200 ${
+              t.type === 'success'
+                ? 'bg-emerald-600 text-white border-emerald-400 ring-4 ring-emerald-500/25'
+                : t.type === 'error'
+                ? 'bg-rose-600 text-white border-rose-400 ring-4 ring-rose-500/25'
+                : 'bg-indigo-600 text-white border-indigo-400 ring-4 ring-indigo-500/25'
+            }`}
+          >
+            {t.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-100 shrink-0 mt-0.5" />
+            ) : t.type === 'error' ? (
+              <AlertCircle className="w-5 h-5 text-rose-100 shrink-0 mt-0.5" />
+            ) : (
+              <Info className="w-5 h-5 text-indigo-100 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 text-xs sm:text-sm font-semibold leading-snug drop-shadow-2xs">
+              {t.message}
+            </div>
+            <button
+              onClick={() =>
+                setToasts((prev) => prev.filter((item) => item.id !== t.id))
+              }
+              className="text-white/80 hover:text-white hover:bg-white/10 p-0.5 rounded-lg transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
