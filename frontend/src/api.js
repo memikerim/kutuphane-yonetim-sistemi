@@ -1,4 +1,19 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    const rawUrl = import.meta.env.VITE_API_URL;
+    return rawUrl.endsWith('/api/v1') ? rawUrl : `${rawUrl.replace(/\/+$/, '')}/api/v1`;
+  }
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    return '/api/v1';
+  }
+  return 'http://localhost:8000/api/v1';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export function getToken() {
   return localStorage.getItem('library_token');
@@ -30,7 +45,7 @@ async function request(path, options = {}) {
       headers,
     });
   } catch (err) {
-    throw new Error('Sunucuya bağlanılamadı. Backend servisinin (port 8000) çalıştığından emin olun.');
+    throw new Error('Sunucuya bağlanılamadı. Lütfen backend servisinin çalıştığından ve internet bağlantınızdan emin olun.');
   }
 
   if (response.status === 204) {
