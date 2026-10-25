@@ -88,7 +88,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const loadAllCatalogData = async () => {
     setLoading(true);
     try {
-      const [booksRes, authorsRes, categoriesRes, publishersRes, borrowingsRes, penaltiesRes] =
+      const [booksRes, authorsRes, categoriesRes, publishersRes, borrowingsRes, penaltiesRes, logsRes] =
         await Promise.all([
           api.getBooks({ page: 1, limit: 100 }),
           api.getAuthors(),
@@ -96,6 +96,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
           api.getPublishers(),
           api.getAdminBorrowings().catch(() => []),
           api.getUnpaidPenalties().catch(() => ({ total_unpaid_amount: 0, debtor_count: 0, items: [] })),
+          api.getSystemLogs({ limit: 100 }).catch(() => []),
         ]);
       setBooks(booksRes?.items || []);
       setAuthors(authorsRes || []);
@@ -103,6 +104,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
       setPublishers(publishersRes || []);
       setBorrowings(borrowingsRes || []);
       setUnpaidPenalties(penaltiesRes || { total_unpaid_amount: 0, debtor_count: 0, items: [] });
+      setSystemLogs(logsRes || []);
     } catch (err) {
       notify(err.message || 'Katalog verileri yüklenemedi', 'error');
     } finally {
