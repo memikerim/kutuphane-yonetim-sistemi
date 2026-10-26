@@ -11,6 +11,7 @@ from app.modules.borrowing.models import (
     BorrowingStatus,
     Reservation,
     ReservationStatus,
+    StockMovement,
 )
 from app.modules.catalog.models import (
     Author,
@@ -27,7 +28,7 @@ __all__ = [
     "Base",
     "User", "Role", "RoleName", "user_roles",
     "Publisher", "Category", "Author", "Book", "book_authors", "book_categories",
-    "Borrowing", "BorrowingStatus", "Reservation", "ReservationStatus",
+    "Borrowing", "BorrowingStatus", "Reservation", "ReservationStatus", "StockMovement",
     "Review", "ReviewReaction",
     "SystemLog",
 ]

@@ -101,6 +101,7 @@ export const api = {
     return request(`/books${qs ? `?${qs}` : ''}`);
   },
   getBook: (id) => request(`/books/${id}`),
+  getBookHistory: (id) => request(`/books/${id}/history`),
   lookupIsbn: (isbn) =>
     request(`/books/lookup-isbn/${encodeURIComponent(isbn)}`),
   createBook: (data) =>
@@ -137,13 +138,46 @@ export const api = {
   getMyBorrowings: () => request('/borrowings'),
   borrowBook: (data) =>
     request('/borrowings', { method: 'POST', body: JSON.stringify(data) }),
-  returnBook: (id) =>
-    request(`/borrowings/${id}/return`, { method: 'PATCH' }),
+  returnBook: (id, data = null) =>
+    request(`/borrowings/${id}/return`, {
+      method: 'PATCH',
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    }),
+  cancelBorrowRequest: (id) =>
+    request(`/borrowings/${id}/cancel-request`, { method: 'POST' }),
   payPenalty: (id) =>
     request(`/borrowings/${id}/pay-penalty`, { method: 'POST' }),
 
-  // Admin Borrowings & Overdue Simulation
+  // Admin Borrowings, Approval Queue, Stock Movements & Overdue Simulation
   getAdminBorrowings: () => request('/admin/borrowings'),
+  approveBorrow: (id, data = {}) =>
+    request(`/admin/borrowings/${id}/approve-borrow`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  rejectBorrow: (id, data = {}) =>
+    request(`/admin/borrowings/${id}/reject-borrow`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  approveReturn: (id, data = {}) =>
+    request(`/admin/borrowings/${id}/approve-return`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getStockMovements: (params = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.condition) searchParams.set('condition', params.condition);
+    if (params.book_id) searchParams.set('book_id', params.book_id);
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    const qs = searchParams.toString();
+    return request(`/admin/stock-movements${qs ? `?${qs}` : ''}`);
+  },
+  createStockMovement: (data) =>
+    request('/admin/stock-movements', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   simulateOverdue: (id) =>
     request(`/admin/borrowings/${id}/simulate-overdue`, { method: 'PATCH' }),
   getUnpaidPenalties: () => request('/admin/unpaid-penalties'),

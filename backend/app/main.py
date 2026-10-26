@@ -44,9 +44,15 @@ async def lifespan(_app: FastAPI):
         # Tablolar ve veriler zaten mevcutsa create_all ve JSON ayrıştırmasını atlar (~2 sn kazandırır).
         # Yalnızca veritabanı tamamen boşsa seed_cloud() çalıştırılır.
         need_seed = False
+        need_schema_upgrade = False
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1 FROM books LIMIT 1"))
+                try:
+                    conn.execute(text("SELECT approval_status FROM borrowings LIMIT 1"))
+                    conn.execute(text("SELECT 1 FROM stock_movements LIMIT 1"))
+                except Exception:
+                    need_schema_upgrade = True
         except Exception:
             need_seed = True
 
@@ -56,6 +62,39 @@ async def lifespan(_app: FastAPI):
                 seed_cloud()
             except Exception as e:
                 logger.warning(f"Otomatik şema ve tohumlama sırasında hata: {e}")
+        elif need_schema_upgrade:
+            try:
+                from app.modules.borrowing.models import StockMovement
+
+                StockMovement.__table__.create(bind=engine, checkfirst=True)
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) DEFAULT 'APPROVED' NOT NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_condition VARCHAR(20) DEFAULT 'GOOD' NOT NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS damage_penalty FLOAT DEFAULT 0.0 NOT NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_notes VARCHAR(500)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)"
+                        )
+                    )
+            except Exception as e:
+                logger.warning(f"Şema güncellemesi sırasında uyarı: {e}")
 
     sync_task = None
     if not getattr(_app.state, "testing", False):

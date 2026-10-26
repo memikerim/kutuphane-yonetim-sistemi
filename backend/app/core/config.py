@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     DAILY_PENALTY_RATE: float = 10.0
+    DAMAGED_BOOK_PENALTY: float = 100.0
+    LOST_BOOK_PENALTY: float = 250.0
 
     @property
     def DATABASE_URL(self) -> str:

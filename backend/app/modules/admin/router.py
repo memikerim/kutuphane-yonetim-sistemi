@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from app.core.database import DbSession
@@ -22,7 +22,15 @@ from app.modules.borrowing.models import (
     Reservation,
     ReservationStatus,
 )
-from app.modules.borrowing.schemas import BorrowingRead
+from app.modules.borrowing.schemas import (
+    AdminApproveBorrowRequest,
+    AdminApproveReturnRequest,
+    AdminRejectBorrowRequest,
+    BorrowingRead,
+    StockMovementCreate,
+    StockMovementRead,
+    StockMovementSummaryResponse,
+)
 from app.modules.catalog.models import Book
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -114,6 +122,105 @@ def list_system_logs(
     level: str | None = Query(None, description="Seviye filtresi (INFO, WARNING, ERROR)"),
 ):
     return get_system_logs(limit=limit, category=category, level=level)
+
+
+@router.post(
+    "/borrowings/{id}/approve-borrow",
+    response_model=BorrowingRead,
+    summary="Bekleyen ödünç alma talebini onayla ve teslim et (yalnızca ADMIN)",
+)
+def approve_borrow(
+    id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+    data: AdminApproveBorrowRequest | None = Body(default=None),
+):
+    try:
+        return borrowing_service.admin_approve_borrow(
+            db, admin, id, admin_notes=data.admin_notes if data else None
+        )
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except borrowing_service.BusinessRuleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.post(
+    "/borrowings/{id}/reject-borrow",
+    response_model=BorrowingRead,
+    summary="Bekleyen ödünç alma talebini reddet ve stoğu geri yükle (yalnızca ADMIN)",
+)
+def reject_borrow(
+    id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+    data: AdminRejectBorrowRequest | None = Body(default=None),
+):
+    try:
+        return borrowing_service.admin_reject_borrow(
+            db, admin, id, admin_notes=data.admin_notes if data else None
+        )
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except borrowing_service.BusinessRuleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.post(
+    "/borrowings/{id}/approve-return",
+    response_model=BorrowingRead,
+    summary="İade talebini fiziksel durum kontrolüyle (Sağlam/Hasarlı/Kayıp) onayla (yalnızca ADMIN)",
+)
+def approve_return(
+    id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+    data: AdminApproveReturnRequest | None = Body(default=None),
+):
+    req_data = data or AdminApproveReturnRequest()
+    try:
+        return borrowing_service.admin_approve_return(db, admin, id, req_data)
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except borrowing_service.BusinessRuleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.get(
+    "/stock-movements",
+    response_model=StockMovementSummaryResponse,
+    summary="Stok hareketlerini ve hasar/kayıp raporlarını listele (yalnızca ADMIN)",
+)
+def list_stock_movements(
+    admin: AdminUser,
+    db: DbSession,
+    condition: str | None = Query(None, description="Filtre: ALL, GOOD, DAMAGED, LOST, RESTOCK"),
+    book_id: uuid.UUID | None = Query(None, description="Belirli bir kitaba göre filtrele"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    return borrowing_service.get_stock_movements_summary(
+        db, condition=condition, book_id=book_id, limit=limit
+    )
+
+
+@router.post(
+    "/stock-movements",
+    response_model=StockMovementRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Manuel stok hareketi veya hasar/kayıp raporu ekle (yalnızca ADMIN)",
+)
+def create_stock_movement(
+    data: StockMovementCreate,
+    admin: AdminUser,
+    db: DbSession,
+):
+    try:
+        return borrowing_service.create_manual_stock_movement(db, admin, data)
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except borrowing_service.BusinessRuleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
 
 
 

@@ -26,6 +26,8 @@ class UnpaidPenaltyItem(BaseModel):
     due_date: date = Field(..., description="Son teslim tarihi")
     return_date: date | datetime | None = Field(None, description="İade tarihi (iade edilmişse)")
     status: str = Field(..., description="Durum: OVERDUE (Gecikmiş Aktif) veya RETURNED (İade Edilmiş/Ödenmemiş)")
+    return_condition: str = Field("GOOD", description="Fiziksel durum: GOOD, DAMAGED, LOST")
+    damage_penalty: float = Field(0.0, description="Hasar veya kayıp tazminatı (TL)")
     overdue_days: int = Field(..., description="Geciken gün sayısı")
     penalty_amount: float = Field(..., description="Hesaplanan / tahakkuk eden ceza tutarı (TL)")
     is_penalty_paid: bool = Field(False, description="Ceza ödendi mi?")

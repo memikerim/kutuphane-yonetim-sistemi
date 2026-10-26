@@ -14,9 +14,21 @@ from app.modules.borrowing.models import (
     BorrowingStatus,
     Reservation,
     ReservationStatus,
+    StockMovement,
     _ensure_utc,
 )
-from app.modules.borrowing.schemas import BorrowingCreate, ReservationCreate
+from app.modules.borrowing.schemas import (
+    AdminApproveReturnRequest,
+    BookHistoryResponse,
+    BookHistoryStats,
+    BookReadingRecord,
+    BorrowingCreate,
+    BorrowingReturn,
+    ReservationCreate,
+    StockMovementCreate,
+    StockMovementRead,
+    StockMovementSummaryResponse,
+)
 from app.modules.catalog.models import Book
 
 logger = logging.getLogger(__name__)
@@ -41,6 +53,7 @@ def sync_overdue_borrowings(db: Session, user_id: uuid.UUID | None = None) -> No
     today = date.today()
     stmt = select(Borrowing).where(
         Borrowing.status == BorrowingStatus.ACTIVE,
+        Borrowing.approval_status != "PENDING_BORROW",
         Borrowing.due_date < today,
     )
     if user_id is not None:
@@ -65,8 +78,10 @@ def _check_user_overdue_or_unpaid_penalty(db: Session, user: User) -> None:
         db.scalars(select(Borrowing).where(Borrowing.user_id == user.id)).all()
     )
     for b in user_borrowings:
-        is_overdue_active = b.status != BorrowingStatus.RETURNED and (
-            b.status == BorrowingStatus.OVERDUE or b.due_date < today
+        is_overdue_active = (
+            b.status != BorrowingStatus.RETURNED
+            and b.approval_status != "PENDING_BORROW"
+            and (b.status == BorrowingStatus.OVERDUE or b.due_date < today)
         )
         has_unpaid_penalty = (b.penalty_amount or 0.0) > 0 and not b.is_penalty_paid
 
@@ -325,13 +340,17 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
                     "Şu an ödünç alamazsınız, sadece rezerve ederek sıraya girebilirsiniz."
                 )
 
+    stock_before = int(book.stock_count or 0)
     # Race condition koruması için atomic update
     book.stock_count = Book.stock_count - 1
 
+    approval_status = "PENDING_BORROW" if getattr(data, "request_approval", False) else "APPROVED"
     borrowing = Borrowing(
         user_id=user.id,
         book_id=book.id,
         due_date=data.due_date,
+        approval_status=approval_status,
+        return_notes=getattr(data, "notes", None),
     )
     db.add(borrowing)
 
@@ -340,6 +359,26 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
         db.delete(user_res)
 
     try:
+        db.flush()
+        movement = StockMovement(
+            book_id=book.id,
+            user_id=user.id,
+            borrowing_id=borrowing.id,
+            movement_type="BORROW_REQUEST" if approval_status == "PENDING_BORROW" else "BORROW_DIRECT",
+            condition="GOOD",
+            quantity_change=-1,
+            stock_before=stock_before,
+            stock_after=max(0, stock_before - 1),
+            penalty_added=0.0,
+            notes=(
+                f"Ödünç talebi oluşturuldu (Görevli onayı bekleniyor). Not: {data.notes}"
+                if approval_status == "PENDING_BORROW" and getattr(data, "notes", None)
+                else "Ödünç talebi oluşturuldu (Görevli onayı bekleniyor)"
+                if approval_status == "PENDING_BORROW"
+                else "Kitap ödünç alındı"
+            ),
+        )
+        db.add(movement)
         db.commit()
     except IntegrityError as e:
         db.rollback()
@@ -363,17 +402,150 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
     sync_reservations(db, book.id)
     db.refresh(borrowing)
     logger.info(
-        "Kitap başarıyla ödünç alındı -> borrow_id: %s, book_id: %s, user_id: %s, due_date: %s",
+        "Kitap ödünç işlemi kaydedildi -> borrow_id: %s, book_id: %s, user_id: %s, approval_status: %s, due_date: %s",
         borrowing.id,
         book.id,
         user.id,
+        borrowing.approval_status,
         borrowing.due_date,
     )
     return borrowing
 
 
-def return_borrowing(db: Session, user: User, borrowing_id: uuid.UUID) -> Borrowing:
-    """Kitabı iade eder, stok artırır ve varsa sırada bekleyen rezervasyonun 24 saatlik süresini başlatır."""
+def _complete_return_transaction(
+    db: Session,
+    borrowing: Borrowing,
+    cond: str = "GOOD",
+    damage_penalty_override: float | None = None,
+    withdraw_override: bool | None = None,
+    admin_user: User | None = None,
+    notes: str | None = None,
+) -> Borrowing:
+    cond = (cond or "GOOD").upper()
+    if cond not in ("GOOD", "DAMAGED", "LOST"):
+        cond = "GOOD"
+
+    today = date.today()
+    borrowing.status = BorrowingStatus.RETURNED
+    borrowing.approval_status = "APPROVED"
+    borrowing.return_date = today
+    borrowing.return_condition = cond
+    if notes and not admin_user:
+        borrowing.return_notes = notes
+    if admin_user and notes:
+        borrowing.admin_notes = notes
+
+    overdue_days = max(0, (today - borrowing.due_date).days) if today > borrowing.due_date else 0
+    overdue_penalty = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+
+    if damage_penalty_override is not None:
+        dmg_penalty = round(float(damage_penalty_override), 2)
+    elif cond == "DAMAGED":
+        dmg_penalty = float(settings.DAMAGED_BOOK_PENALTY)
+    elif cond == "LOST":
+        dmg_penalty = float(settings.LOST_BOOK_PENALTY)
+    else:
+        dmg_penalty = 0.0
+
+    borrowing.damage_penalty = dmg_penalty
+    total_penalty = round(overdue_penalty + dmg_penalty, 2)
+    borrowing.penalty_amount = total_penalty
+    borrowing.is_penalty_paid = False
+
+    if total_penalty > 0:
+        logger.warning(
+            "İade sırasında ceza/tazminat oluştu -> borrow_id: %s, user_id: %s, condition: %s, overdue_days: %d, damage_penalty: %.2f, total: %.2f TL",
+            borrowing.id,
+            borrowing.user_id,
+            cond,
+            overdue_days,
+            dmg_penalty,
+            total_penalty,
+        )
+
+    book = db.get(Book, borrowing.book_id)
+    stock_before = int(book.stock_count or 0) if book else 0
+
+    if cond == "LOST":
+        restore_to_stock = False
+    elif cond == "DAMAGED":
+        restore_to_stock = False if withdraw_override is None else (not withdraw_override)
+    else:
+        restore_to_stock = True
+
+    qty_change = 0
+    if book and restore_to_stock:
+        book.stock_count = Book.stock_count + 1
+        qty_change = 1
+
+    stock_after = stock_before + qty_change
+    movement_type = (
+        "RETURN_GOOD"
+        if cond == "GOOD"
+        else "RETURN_DAMAGED"
+        if cond == "DAMAGED"
+        else "RETURN_LOST"
+    )
+    default_note = (
+        "Kitap sağlam olarak iade alındı ve rafa eklendi (+1)"
+        if cond == "GOOD"
+        else f"Hasarlı kitap iadesi ({dmg_penalty:.0f} TL hasar tazminatı yansıtıldı)"
+        if cond == "DAMAGED"
+        else f"Kayıp kitap bildirimi ({dmg_penalty:.0f} TL kayıp bedeli yansıtıldı, stoktan düşüldü)"
+    )
+    combined_note = notes or borrowing.admin_notes or borrowing.return_notes or default_note
+
+    if book:
+        movement = StockMovement(
+            book_id=book.id,
+            user_id=borrowing.user_id,
+            admin_id=admin_user.id if admin_user else None,
+            borrowing_id=borrowing.id,
+            movement_type=movement_type,
+            condition=cond,
+            quantity_change=qty_change,
+            stock_before=stock_before,
+            stock_after=stock_after,
+            penalty_added=dmg_penalty,
+            notes=combined_note,
+        )
+        db.add(movement)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        logger.error(
+            "İade işlemi sırasında veritabanı hatası -> borrow_id: %s, error: %s",
+            borrowing.id,
+            exc,
+            exc_info=True,
+        )
+        raise BusinessRuleError("İade işlemi sırasında veritabanı hatası oluştu")
+
+    if book:
+        db.refresh(book)
+        sync_reservations(db, book.id)
+
+    db.refresh(borrowing)
+    logger.info(
+        "Kitap başarıyla iade edildi -> borrow_id: %s, book_id: %s, user_id: %s, condition: %s, return_date: %s",
+        borrowing.id,
+        borrowing.book_id,
+        borrowing.user_id,
+        borrowing.return_condition,
+        borrowing.return_date,
+    )
+    return borrowing
+
+
+def return_borrowing(
+    db: Session,
+    user: User,
+    borrowing_id: uuid.UUID,
+    return_data: BorrowingReturn | None = None,
+) -> Borrowing:
+    """Kitabı iade eder veya görevli onay kuyruğuna (PENDING_RETURN) gönderir."""
     borrowing = db.get(Borrowing, borrowing_id)
     if not borrowing:
         logger.warning(
@@ -400,57 +572,40 @@ def return_borrowing(db: Session, user: User, borrowing_id: uuid.UUID) -> Borrow
         )
         raise BusinessRuleError("Bu kitap zaten iade edilmiş")
 
-    today = date.today()
-    borrowing.status = BorrowingStatus.RETURNED
-    borrowing.return_date = today
+    if borrowing.approval_status == "PENDING_BORROW":
+        raise BusinessRuleError(
+            "Henüz görevli tarafından onaylanmamış ödünç talebi iade edilemez; talebi iptal edebilirsiniz."
+        )
 
-    if today > borrowing.due_date:
-        overdue_days = (today - borrowing.due_date).days
-        penalty = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
-        borrowing.penalty_amount = penalty
-        borrowing.is_penalty_paid = False
-        logger.warning(
-            "Gecikmeli iade: Ceza oluşturuldu -> borrow_id: %s, user_id: %s, overdue_days: %d, penalty_amount: %.2f TL",
+    req_approval = bool(getattr(return_data, "request_approval", False)) if return_data else False
+    cond = (getattr(return_data, "return_condition", "GOOD") or "GOOD").upper() if return_data else "GOOD"
+    if cond not in ("GOOD", "DAMAGED", "LOST"):
+        cond = "GOOD"
+    notes = getattr(return_data, "return_notes", None) if return_data else None
+
+    if req_approval:
+        if borrowing.approval_status == "PENDING_RETURN":
+            raise BusinessRuleError("Bu kitap için zaten görevli onayı bekleyen bir iade talebiniz bulunuyor")
+        borrowing.approval_status = "PENDING_RETURN"
+        borrowing.return_condition = cond
+        if notes:
+            borrowing.return_notes = notes
+        db.commit()
+        db.refresh(borrowing)
+        logger.info(
+            "İade ve fiziksel kontrol talebi oluşturuldu (Görevli onayı bekleniyor) -> borrow_id: %s, user_id: %s, condition: %s",
             borrowing.id,
             user.id,
-            overdue_days,
-            penalty,
+            cond,
         )
-    else:
-        borrowing.penalty_amount = 0.0
-        borrowing.is_penalty_paid = False
+        return borrowing
 
-    # Stok iadesi (atomic update)
-    book = db.get(Book, borrowing.book_id)
-    if book:
-        book.stock_count = Book.stock_count + 1
-
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        logger.error(
-            "İade işlemi sırasında veritabanı hatası -> borrow_id: %s, error: %s",
-            borrowing_id,
-            exc,
-            exc_info=True,
-        )
-        raise BusinessRuleError("İade işlemi sırasında veritabanı hatası oluştu")
-
-    # Kitap stoğu arttığı anda sırada bekleyen rezervasyon varsa 24 saatlik süresini başlat
-    if book:
-        db.refresh(book)
-        sync_reservations(db, book.id)
-
-    db.refresh(borrowing)
-    logger.info(
-        "Kitap başarıyla iade edildi -> borrow_id: %s, book_id: %s, user_id: %s, return_date: %s",
-        borrowing.id,
-        borrowing.book_id,
-        user.id,
-        borrowing.return_date,
+    return _complete_return_transaction(
+        db=db,
+        borrowing=borrowing,
+        cond=cond,
+        notes=notes,
     )
-    return borrowing
 
 
 def create_reservation(db: Session, user: User, data: ReservationCreate) -> Reservation:
@@ -670,5 +825,374 @@ def get_user_reservations(db: Session, user: User) -> Sequence[Reservation]:
         .order_by(Reservation.reservation_date.asc())
     )
     return db.scalars(stmt).all()
+
+
+def cancel_borrow_request(db: Session, user: User, borrowing_id: uuid.UUID) -> Borrowing:
+    """Kullanıcının henüz görevli tarafından onaylanmamış (PENDING_BORROW) ödünç talebini iptal eder ve stoğu geri yükler."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç talebi bulunamadı")
+    if borrowing.user_id != user.id:
+        raise BusinessRuleError("Bu ödünç talebi size ait değil")
+    if borrowing.approval_status != "PENDING_BORROW" or borrowing.status == BorrowingStatus.RETURNED:
+        raise BusinessRuleError("Yalnızca görevli onayı bekleyen ödünç talepleri iptal edilebilir")
+
+    book = db.get(Book, borrowing.book_id)
+    stock_before = int(book.stock_count or 0) if book else 0
+    if book:
+        book.stock_count = Book.stock_count + 1
+
+    borrowing.approval_status = "REJECTED"
+    borrowing.status = BorrowingStatus.RETURNED
+    borrowing.return_date = date.today()
+    borrowing.admin_notes = "Kullanıcı tarafından ödünç talebi iptal edildi"
+
+    if book:
+        db.add(
+            StockMovement(
+                book_id=book.id,
+                user_id=user.id,
+                borrowing_id=borrowing.id,
+                movement_type="BORROW_REJECTED",
+                condition="GOOD",
+                quantity_change=1,
+                stock_before=stock_before,
+                stock_after=stock_before + 1,
+                penalty_added=0.0,
+                notes="Kullanıcı ödünç talebini iptal etti (+1 stok iade edildi)",
+            )
+        )
+
+    db.commit()
+    if book:
+        db.refresh(book)
+        sync_reservations(db, book.id)
+    db.refresh(borrowing)
+    logger.info(
+        "Ödünç talebi kullanıcı tarafından iptal edildi -> borrow_id: %s, user_id: %s",
+        borrowing.id,
+        user.id,
+    )
+    return borrowing
+
+
+def admin_approve_borrow(
+    db: Session,
+    admin_user: User,
+    borrowing_id: uuid.UUID,
+    admin_notes: str | None = None,
+) -> Borrowing:
+    """Görevli (ADMIN) bekleyen ödünç talebini (PENDING_BORROW) onaylar ve kitabı teslim eder."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.status == BorrowingStatus.RETURNED or borrowing.approval_status != "PENDING_BORROW":
+        raise BusinessRuleError("Bu kayıt görevli ödünç onayı beklemiyor")
+
+    today = date.today()
+    borrowing.approval_status = "APPROVED"
+    borrowing.borrow_date = today
+    if borrowing.due_date < today:
+        borrowing.due_date = today + timedelta(days=14)
+    if admin_notes:
+        borrowing.admin_notes = admin_notes
+
+    book = db.get(Book, borrowing.book_id)
+    cur_stock = int(book.stock_count or 0) if book else 0
+    if book:
+        db.add(
+            StockMovement(
+                book_id=book.id,
+                user_id=borrowing.user_id,
+                admin_id=admin_user.id,
+                borrowing_id=borrowing.id,
+                movement_type="BORROW_APPROVED",
+                condition="GOOD",
+                quantity_change=0,
+                stock_before=cur_stock,
+                stock_after=cur_stock,
+                penalty_added=0.0,
+                notes=admin_notes or "Ödünç talebi görevli tarafından onaylandı ve kitap üyeye teslim edildi",
+            )
+        )
+
+    db.commit()
+    db.refresh(borrowing)
+    logger.info(
+        "Ödünç talebi görevli tarafından onaylandı -> borrow_id: %s, user_id: %s, admin_id: %s",
+        borrowing.id,
+        borrowing.user_id,
+        admin_user.id,
+    )
+    return borrowing
+
+
+def admin_reject_borrow(
+    db: Session,
+    admin_user: User,
+    borrowing_id: uuid.UUID,
+    admin_notes: str | None = None,
+) -> Borrowing:
+    """Görevli (ADMIN) bekleyen ödünç talebini (PENDING_BORROW) reddeder ve ayrılan stoğu rafa geri ekler."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.status == BorrowingStatus.RETURNED or borrowing.approval_status != "PENDING_BORROW":
+        raise BusinessRuleError("Bu kayıt görevli ödünç onayı beklemiyor")
+
+    book = db.get(Book, borrowing.book_id)
+    stock_before = int(book.stock_count or 0) if book else 0
+    if book:
+        book.stock_count = Book.stock_count + 1
+
+    borrowing.approval_status = "REJECTED"
+    borrowing.status = BorrowingStatus.RETURNED
+    borrowing.return_date = date.today()
+    borrowing.admin_notes = admin_notes or "Ödünç talebi görevli tarafından reddedildi"
+
+    if book:
+        db.add(
+            StockMovement(
+                book_id=book.id,
+                user_id=borrowing.user_id,
+                admin_id=admin_user.id,
+                borrowing_id=borrowing.id,
+                movement_type="BORROW_REJECTED",
+                condition="GOOD",
+                quantity_change=1,
+                stock_before=stock_before,
+                stock_after=stock_before + 1,
+                penalty_added=0.0,
+                notes=borrowing.admin_notes,
+            )
+        )
+
+    db.commit()
+    if book:
+        db.refresh(book)
+        sync_reservations(db, book.id)
+    db.refresh(borrowing)
+    logger.info(
+        "Ödünç talebi görevli tarafından reddedildi ve stok iade edildi -> borrow_id: %s, admin_id: %s",
+        borrowing.id,
+        admin_user.id,
+    )
+    return borrowing
+
+
+def admin_approve_return(
+    db: Session,
+    admin_user: User,
+    borrowing_id: uuid.UUID,
+    data: AdminApproveReturnRequest,
+) -> Borrowing:
+    """Görevli (ADMIN) kitabın fiziksel durumunu (Sağlam / Hasarlı / Kayıp) kontrol ederek iadeyi onaylar."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.status == BorrowingStatus.RETURNED:
+        raise BusinessRuleError("Bu kitap zaten iade edilmiş")
+    if borrowing.approval_status == "PENDING_BORROW":
+        raise BusinessRuleError("Henüz teslim edilmemiş ödünç talebi iade alınamaz; önce onaylayın veya reddedin")
+
+    return _complete_return_transaction(
+        db=db,
+        borrowing=borrowing,
+        cond=data.return_condition or borrowing.return_condition or "GOOD",
+        damage_penalty_override=data.damage_penalty,
+        withdraw_override=data.withdraw_from_stock,
+        admin_user=admin_user,
+        notes=data.admin_notes,
+    )
+
+
+def create_manual_stock_movement(
+    db: Session,
+    admin_user: User,
+    data: StockMovementCreate,
+) -> StockMovement:
+    """Görevli tarafından doğrudan hasarlı/kayıp kitap stok düşümü veya yeni stok girişi kaydeder."""
+    book = db.get(Book, data.book_id)
+    if not book:
+        raise NotFoundError("Kitap bulunamadı")
+
+    m_type = (data.movement_type or "ADMIN_RESTOCK").upper()
+    if m_type not in ("ADMIN_DAMAGE", "ADMIN_LOST", "ADMIN_RESTOCK"):
+        raise BusinessRuleError("Geçersiz stok hareket türü (ADMIN_DAMAGE, ADMIN_LOST, ADMIN_RESTOCK olmalıdır)")
+
+    qty = int(data.quantity or 1)
+    stock_before = int(book.stock_count or 0)
+
+    if m_type in ("ADMIN_DAMAGE", "ADMIN_LOST"):
+        if stock_before < qty:
+            raise BusinessRuleError(
+                f"Mevcut stok ({stock_before} adet), düşülmek istenen miktardan ({qty} adet) az olamaz"
+            )
+        book.stock_count = Book.stock_count - qty
+        qty_change = -qty
+        stock_after = stock_before - qty
+        cond = "DAMAGED" if m_type == "ADMIN_DAMAGE" else "LOST"
+        default_note = (
+            f"Raf/envanter kontrolünde {qty} adet hasarlı kitap tespit edilerek stoktan düşüldü"
+            if m_type == "ADMIN_DAMAGE"
+            else f"Envanter sayımında {qty} adet kayıp kitap tespit edilerek stoktan düşüldü"
+        )
+    else:
+        book.stock_count = Book.stock_count + qty
+        qty_change = qty
+        stock_after = stock_before + qty
+        cond = "GOOD"
+        default_note = f"Envantere {qty} adet yeni/sağlam kitap stoğu eklendi"
+
+    movement = StockMovement(
+        book_id=book.id,
+        admin_id=admin_user.id,
+        movement_type=m_type,
+        condition=cond,
+        quantity_change=qty_change,
+        stock_before=stock_before,
+        stock_after=stock_after,
+        penalty_added=0.0,
+        notes=data.notes or default_note,
+    )
+    db.add(movement)
+    db.commit()
+    db.refresh(book)
+    sync_reservations(db, book.id)
+    db.refresh(movement)
+    logger.info(
+        "Manuel stok/envanter hareketi kaydedildi -> book_id: %s, type: %s, change: %d, stock_after: %d",
+        book.id,
+        m_type,
+        qty_change,
+        stock_after,
+    )
+    return movement
+
+
+def get_stock_movements_summary(
+    db: Session,
+    condition: str | None = None,
+    book_id: uuid.UUID | None = None,
+    limit: int = 100,
+) -> StockMovementSummaryResponse:
+    """Tüm stok hareketlerini ve hasar/kayıp raporlarını özet istatistiklerle döndürür."""
+    all_movements = list(
+        db.scalars(select(StockMovement).order_by(StockMovement.created_at.desc())).all()
+    )
+
+    damaged_count = sum(1 for m in all_movements if m.condition == "DAMAGED")
+    lost_count = sum(1 for m in all_movements if m.condition == "LOST")
+    restock_count = sum(1 for m in all_movements if m.movement_type == "ADMIN_RESTOCK")
+    total_comp = round(sum(float(m.penalty_added or 0.0) for m in all_movements), 2)
+
+    filtered = all_movements
+    if condition and condition.upper() != "ALL":
+        c_up = condition.upper()
+        if c_up == "RESTOCK":
+            filtered = [m for m in filtered if m.quantity_change > 0]
+        else:
+            filtered = [m for m in filtered if m.condition == c_up]
+    if book_id is not None:
+        filtered = [m for m in filtered if m.book_id == book_id]
+
+    items = [StockMovementRead.model_validate(m) for m in filtered[:limit]]
+    return StockMovementSummaryResponse(
+        total_movements=len(all_movements),
+        damaged_reports_count=damaged_count,
+        lost_reports_count=lost_count,
+        restock_count=restock_count,
+        total_compensation_amount=total_comp,
+        items=items,
+    )
+
+
+def get_book_history(db: Session, book_id: uuid.UUID) -> BookHistoryResponse:
+    """Belirli bir kitabın okuma geçmişini, aktif okuyucularını ve stok/hasar/kayıp hareketlerini döner."""
+    book = db.get(Book, book_id)
+    if not book:
+        raise NotFoundError("Kitap bulunamadı")
+
+    sync_overdue_borrowings(db)
+
+    borrowings = list(
+        db.scalars(
+            select(Borrowing)
+            .where(Borrowing.book_id == book_id)
+            .order_by(Borrowing.borrow_date.desc())
+        ).all()
+    )
+    movements = list(
+        db.scalars(
+            select(StockMovement)
+            .where(StockMovement.book_id == book_id)
+            .order_by(StockMovement.created_at.desc())
+        ).all()
+    )
+
+    non_rejected = [b for b in borrowings if b.approval_status != "REJECTED"]
+    active_cnt = sum(
+        1
+        for b in non_rejected
+        if b.status != BorrowingStatus.RETURNED and b.approval_status != "PENDING_BORROW"
+    )
+    pending_cnt = sum(
+        1
+        for b in borrowings
+        if b.status != BorrowingStatus.RETURNED
+        and b.approval_status in ("PENDING_BORROW", "PENDING_RETURN")
+    )
+    returned_cnt = sum(
+        1
+        for b in non_rejected
+        if b.status == BorrowingStatus.RETURNED
+    )
+    damaged_cnt = sum(1 for m in movements if m.condition == "DAMAGED")
+    lost_cnt = sum(1 for m in movements if m.condition == "LOST")
+    total_dmg_penalty = round(
+        sum(float(b.damage_penalty or 0.0) for b in borrowings), 2
+    )
+
+    reading_records: list[BookReadingRecord] = []
+    for b in borrowings:
+        reader_name = b.user_full_name or "Üye"
+        reading_records.append(
+            BookReadingRecord(
+                borrowing_id=b.id,
+                user_id=b.user_id,
+                reader_name=reader_name,
+                reader_email=b.user_email,
+                borrow_date=b.borrow_date,
+                due_date=b.due_date,
+                return_date=b.return_date,
+                status=b.status.value if hasattr(b.status, "value") else str(b.status),
+                approval_status=b.approval_status or "APPROVED",
+                return_condition=b.return_condition or "GOOD",
+                overdue_days=b.overdue_days,
+                penalty_amount=float(b.penalty_amount or 0.0),
+                damage_penalty=float(b.damage_penalty or 0.0),
+                return_notes=b.return_notes,
+                admin_notes=b.admin_notes,
+            )
+        )
+
+    return BookHistoryResponse(
+        book_id=book.id,
+        book_title=book.title,
+        book_isbn=book.isbn,
+        current_stock=int(book.stock_count or 0),
+        stats=BookHistoryStats(
+            total_borrow_count=len(non_rejected),
+            active_borrow_count=active_cnt,
+            pending_approval_count=pending_cnt,
+            returned_count=returned_cnt,
+            damaged_count=damaged_cnt,
+            lost_count=lost_cnt,
+            total_damage_loss_penalty=total_dmg_penalty,
+        ),
+        reading_history=reading_records,
+        stock_movements=[StockMovementRead.model_validate(m) for m in movements],
+    )
+
 
 

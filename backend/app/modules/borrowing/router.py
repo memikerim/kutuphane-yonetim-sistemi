@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, status
 
 from app.core.database import DbSession
 from app.modules.auth.dependencies import CurrentUser
@@ -8,6 +8,7 @@ from app.modules.borrowing import service
 from app.modules.borrowing.schemas import (
     BorrowingCreate,
     BorrowingRead,
+    BorrowingReturn,
     ReservationCreate,
     ReservationRead,
 )
@@ -42,13 +43,25 @@ def borrow_book(data: BorrowingCreate, db: DbSession, current_user: CurrentUser)
     return handle_service_error(service.create_borrowing, db, current_user, data)
 
 
-@router.patch("/borrowings/{id}/return", response_model=BorrowingRead, summary="Kitabı iade et")
-def return_book(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
+@router.patch("/borrowings/{id}/return", response_model=BorrowingRead, summary="Kitabı iade et veya iade talebi oluştur")
+def return_book(
+    id: uuid.UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+    data: BorrowingReturn | None = Body(default=None),
+):
     """
-    Ödünç alınan kitabı iade eder.
-    Kayıt durumu RETURNED yapılır, iade tarihi atılır, gecikme varsa ceza hesaplanır ve kitap stoku 1 artırılır.
+    Ödünç alınan kitabı iade eder veya fiziksel kontrol için görevli onay kuyruğuna (PENDING_RETURN) gönderir.
     """
-    return handle_service_error(service.return_borrowing, db, current_user, id)
+    return handle_service_error(service.return_borrowing, db, current_user, id, data)
+
+
+@router.post("/borrowings/{id}/cancel-request", response_model=BorrowingRead, summary="Bekleyen ödünç talebini iptal et")
+def cancel_borrow_request(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
+    """
+    Henüz görevli tarafından onaylanmamış (PENDING_BORROW) ödünç talebini iptal eder ve ayrılan stoğu rafa geri ekler.
+    """
+    return handle_service_error(service.cancel_borrow_request, db, current_user, id)
 
 
 @router.post("/borrowings/{id}/pay-penalty", response_model=BorrowingRead, summary="Gecikme cezasını öde")

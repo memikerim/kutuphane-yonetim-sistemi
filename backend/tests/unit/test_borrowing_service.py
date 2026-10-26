@@ -458,4 +458,114 @@ def test_reservation_timer_starts_without_user_login_and_cascades_accurately(db_
     assert 21 * 3600 <= user4_reservations[0].remaining_seconds <= 22 * 3600 + 60
 
 
+def test_approval_workflow_and_damaged_lost_stock_history(db_session, test_user, admin_user, test_book):
+    from app.modules.borrowing.schemas import (
+        AdminApproveReturnRequest,
+        BorrowingReturn,
+        StockMovementCreate,
+    )
+
+    test_book.stock_count = 3
+    db_session.commit()
+
+    # 1. Kullanıcı onay kuyruğuna düşen ödünç talebi oluşturur (PENDING_BORROW)
+    borrow_req = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(
+            book_id=test_book.id,
+            due_date=date.today() + timedelta(days=14),
+            request_approval=True,
+            notes="Sınav hazırlığı için ödünç talep ediyorum",
+        ),
+    )
+    assert borrow_req.approval_status == "PENDING_BORROW"
+    db_session.refresh(test_book)
+    assert test_book.stock_count == 2  # Stok ayrıldı (-1)
+
+    # 2. Admin ödünç talebini onaylar -> APPROVED
+    approved = service.admin_approve_borrow(
+        db_session, admin_user, borrow_req.id, admin_notes="Kimlik kontrolü yapıldı ve teslim edildi"
+    )
+    assert approved.approval_status == "APPROVED"
+    assert approved.status == BorrowingStatus.ACTIVE
+
+    # 3. Kullanıcı kitabı hasarlı olarak iade talebine gönderir (PENDING_RETURN)
+    ret_req = service.return_borrowing(
+        db_session,
+        test_user,
+        borrow_req.id,
+        BorrowingReturn(
+            request_approval=True,
+            return_condition="DAMAGED",
+            return_notes="Su dökülmesi nedeniyle arka kapak hasar gördü",
+        ),
+    )
+    assert ret_req.approval_status == "PENDING_RETURN"
+    assert ret_req.return_condition == "DAMAGED"
+    db_session.refresh(test_book)
+    assert test_book.stock_count == 2  # Henüz onaylanmadığı için stok değişmedi
+
+    # 4. Admin fiziksel kontrolü yapar ve hasarlı iadeyi onaylar (100 TL tazminat + stoktan düşüm)
+    final_ret = service.admin_approve_return(
+        db_session,
+        admin_user,
+        borrow_req.id,
+        AdminApproveReturnRequest(
+            return_condition="DAMAGED",
+            damage_penalty=100.0,
+            withdraw_from_stock=True,
+            admin_notes="Cilt ağır hasarlı, onarıma ayrıldı ve 100 TL hasar tazminatı yansıtıldı",
+        ),
+    )
+    assert final_ret.status == BorrowingStatus.RETURNED
+    assert final_ret.approval_status == "APPROVED"
+    assert final_ret.return_condition == "DAMAGED"
+    assert final_ret.damage_penalty == 100.0
+    assert final_ret.penalty_amount == 100.0
+    assert final_ret.is_penalty_paid is False
+    db_session.refresh(test_book)
+    assert test_book.stock_count == 2  # Hasarlı kopya rafa geri dönmedi
+
+    # 5. Admin manuel olarak 1 adet kayıp raporu ve 2 adet yeni stok girişi ekler
+    service.create_manual_stock_movement(
+        db_session,
+        admin_user,
+        StockMovementCreate(
+            book_id=test_book.id,
+            movement_type="ADMIN_LOST",
+            quantity=1,
+            notes="Yıllık envanter sayımında 1 adet kayıp tespit edildi",
+        ),
+    )
+    db_session.refresh(test_book)
+    assert test_book.stock_count == 1
+
+    service.create_manual_stock_movement(
+        db_session,
+        admin_user,
+        StockMovementCreate(
+            book_id=test_book.id,
+            movement_type="ADMIN_RESTOCK",
+            quantity=2,
+            notes="Yayınevinden 2 yeni kopya tedarik edildi",
+        ),
+    )
+    db_session.refresh(test_book)
+    assert test_book.stock_count == 3
+
+    # 6. Kitap bazlı okuma ve stok geçmişi raporunu doğrula
+    history = service.get_book_history(db_session, test_book.id)
+    assert history.book_id == test_book.id
+    assert history.current_stock == 3
+    assert history.stats.total_borrow_count == 1
+    assert history.stats.returned_count == 1
+    assert history.stats.damaged_count == 1
+    assert history.stats.lost_count == 1
+    assert history.stats.total_damage_loss_penalty == 100.0
+    assert len(history.reading_history) == 1
+    assert len(history.stock_movements) >= 4
+
+
+
 

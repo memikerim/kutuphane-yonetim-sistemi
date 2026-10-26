@@ -24,10 +24,12 @@ import {
   Filter,
   AlertCircle,
   Info,
+  History,
+  FileWarning,
 } from 'lucide-react';
 import { api } from '../api';
 
-export default function AdminPanel({ notify, onCatalogChanged }) {
+export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
   const [subTab, setSubTab] = useState('books');
   const [loading, setLoading] = useState(true);
 
@@ -37,6 +39,33 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const [publishers, setPublishers] = useState([]);
   const [borrowings, setBorrowings] = useState([]);
   const [simulatingId, setSimulatingId] = useState(null);
+  const [workflowFilter, setWorkflowFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'ACTIVE'
+  const [processingWorkflowId, setProcessingWorkflowId] = useState(null);
+
+  // Admin İade Fiziksel Kontrol & Onay Modalı State'leri
+  const [inspectModalItem, setInspectModalItem] = useState(null);
+  const [inspectCondition, setInspectCondition] = useState('GOOD'); // 'GOOD' | 'DAMAGED' | 'LOST'
+  const [inspectDamagePenalty, setInspectDamagePenalty] = useState(0);
+  const [inspectWithdrawFromStock, setInspectWithdrawFromStock] = useState(false);
+  const [inspectAdminNotes, setInspectAdminNotes] = useState('');
+
+  // Stok Geçmişi & Hasar/Kayıp Raporları State'leri
+  const [stockSummary, setStockSummary] = useState({
+    total_movements: 0,
+    damaged_count: 0,
+    lost_count: 0,
+    total_damage_lost_penalty: 0,
+    items: [],
+  });
+  const [stockFilter, setStockFilter] = useState('ALL'); // 'ALL' | 'DAMAGED' | 'LOST' | 'RESTOCK'
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [stockSaving, setStockSaving] = useState(false);
+  const [stockForm, setStockForm] = useState({
+    book_id: '',
+    movement_type: 'ADMIN_DAMAGE', // 'ADMIN_DAMAGE' | 'ADMIN_LOST' | 'ADMIN_RESTOCK'
+    quantity: 1,
+    notes: '',
+  });
 
   // Ödenmemiş Borçlar State'leri
   const [unpaidPenalties, setUnpaidPenalties] = useState({
@@ -88,23 +117,53 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
   const loadAllCatalogData = async () => {
     setLoading(true);
     try {
-      const [booksRes, authorsRes, categoriesRes, publishersRes, borrowingsRes, penaltiesRes, logsRes] =
-        await Promise.all([
-          api.getBooks({ page: 1, limit: 100 }),
-          api.getAuthors(),
-          api.getCategories(),
-          api.getPublishers(),
-          api.getAdminBorrowings().catch(() => []),
-          api.getUnpaidPenalties().catch(() => ({ total_unpaid_amount: 0, debtor_count: 0, items: [] })),
-          api.getSystemLogs({ limit: 100 }).catch(() => []),
-        ]);
-      setBooks(booksRes?.items || []);
+      const [
+        booksRes,
+        authorsRes,
+        categoriesRes,
+        publishersRes,
+        borrowingsRes,
+        penaltiesRes,
+        logsRes,
+        stockRes,
+      ] = await Promise.all([
+        api.getBooks({ page: 1, limit: 100 }),
+        api.getAuthors(),
+        api.getCategories(),
+        api.getPublishers(),
+        api.getAdminBorrowings().catch(() => []),
+        api
+          .getUnpaidPenalties()
+          .catch(() => ({ total_unpaid_amount: 0, debtor_count: 0, items: [] })),
+        api.getSystemLogs({ limit: 100 }).catch(() => []),
+        api.getStockMovements({ limit: 150 }).catch(() => ({
+          total_movements: 0,
+          damaged_count: 0,
+          lost_count: 0,
+          total_damage_lost_penalty: 0,
+          items: [],
+        })),
+      ]);
+      const bookItems = booksRes?.items || [];
+      setBooks(bookItems);
       setAuthors(authorsRes || []);
       setCategories(categoriesRes || []);
       setPublishers(publishersRes || []);
       setBorrowings(borrowingsRes || []);
       setUnpaidPenalties(penaltiesRes || { total_unpaid_amount: 0, debtor_count: 0, items: [] });
       setSystemLogs(logsRes || []);
+      setStockSummary(
+        stockRes || {
+          total_movements: 0,
+          damaged_count: 0,
+          lost_count: 0,
+          total_damage_lost_penalty: 0,
+          items: [],
+        }
+      );
+      if (bookItems.length > 0 && !stockForm.book_id) {
+        setStockForm((prev) => ({ ...prev, book_id: bookItems[0].id }));
+      }
     } catch (err) {
       notify(err.message || 'Katalog verileri yüklenemedi', 'error');
     } finally {
@@ -141,6 +200,117 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
       notify(err.message || 'Gecikme simülasyonu başarısız', 'error');
     } finally {
       setSimulatingId(null);
+    }
+  };
+
+  // Admin: Ödünç Talebini Onayla (Teslim Et)
+  const handleApproveBorrow = async (item) => {
+    setProcessingWorkflowId(item.id);
+    try {
+      await api.approveBorrow(item.id, {
+        admin_notes: 'Görevli tarafından fiziksel teslim onaylandı.',
+      });
+      notify(
+        `"${item.user_full_name}" kullanıcısına "${item.book_title}" kitabının ödünç teslimi onaylandı!`,
+        'success'
+      );
+      await loadAllCatalogData();
+      if (onCatalogChanged) onCatalogChanged();
+    } catch (err) {
+      notify(err.message || 'Ödünç onaylanamadı', 'error');
+    } finally {
+      setProcessingWorkflowId(null);
+    }
+  };
+
+  // Admin: Ödünç Talebini Reddet (+1 Stok İade)
+  const handleRejectBorrow = async (item) => {
+    const reason = window.prompt(
+      `"${item.user_full_name}" kullanıcısının "${item.book_title}" ödünç talebini reddetme nedeninizi girin (Ayrılan +1 stok rafa geri eklenecektir):`,
+      'Stok kontrolü sonucu talep reddedildi'
+    );
+    if (reason === null) return;
+    setProcessingWorkflowId(item.id);
+    try {
+      await api.rejectBorrow(item.id, { admin_notes: reason || 'Görevli tarafından reddedildi' });
+      notify('Ödünç talebi reddedildi ve ayrılan stok (+1) rafa geri eklendi.', 'info');
+      await loadAllCatalogData();
+      if (onCatalogChanged) onCatalogChanged();
+    } catch (err) {
+      notify(err.message || 'Ödünç talebi reddedilemedi', 'error');
+    } finally {
+      setProcessingWorkflowId(null);
+    }
+  };
+
+  // Admin: İade Fiziksel Kontrol Modalını Aç
+  const openInspectReturnModal = (item) => {
+    const initialCond = item.return_condition || 'GOOD';
+    setInspectModalItem(item);
+    setInspectCondition(initialCond);
+    setInspectDamagePenalty(
+      initialCond === 'DAMAGED' ? 100 : initialCond === 'LOST' ? 250 : 0
+    );
+    setInspectWithdrawFromStock(initialCond === 'LOST');
+    setInspectAdminNotes(item.admin_notes || '');
+  };
+
+  // Admin: İade & Fiziksel Durum Kontrolünü Onayla
+  const handleApproveReturnSubmit = async (e) => {
+    e.preventDefault();
+    if (!inspectModalItem) return;
+    setProcessingWorkflowId(inspectModalItem.id);
+    try {
+      await api.approveReturn(inspectModalItem.id, {
+        return_condition: inspectCondition,
+        damage_penalty:
+          inspectCondition === 'GOOD' ? 0 : Number(inspectDamagePenalty || 0),
+        withdraw_from_stock:
+          inspectCondition === 'LOST' ? true : Boolean(inspectWithdrawFromStock),
+        admin_notes: inspectAdminNotes.trim() || undefined,
+      });
+      notify(
+        inspectCondition === 'GOOD'
+          ? 'İade fiziksel kontrolü onaylandı! Kitap sağlam olarak rafa (+1 stok) eklendi.'
+          : inspectCondition === 'DAMAGED'
+          ? `Hasarlı kitap iadesi onaylandı ve hasar tazminatı (${inspectDamagePenalty} TL) yansıtıldı.`
+          : `Kayıp kitap raporu onaylandı, stoktan düşüldü ve kayıp tazminatı (${inspectDamagePenalty} TL) yansıtıldı.`,
+        'success'
+      );
+      setInspectModalItem(null);
+      await loadAllCatalogData();
+      if (onCatalogChanged) onCatalogChanged();
+    } catch (err) {
+      notify(err.message || 'İade onayı sırasında hata oluştu', 'error');
+    } finally {
+      setProcessingWorkflowId(null);
+    }
+  };
+
+  // Admin: Manuel Stok / Hasar / Kayıp Raporu Oluştur
+  const handleCreateStockMovementSubmit = async (e) => {
+    e.preventDefault();
+    if (!stockForm.book_id) {
+      notify('Lütfen bir kitap seçin', 'error');
+      return;
+    }
+    setStockSaving(true);
+    try {
+      await api.createStockMovement({
+        book_id: stockForm.book_id,
+        movement_type: stockForm.movement_type,
+        quantity: Number(stockForm.quantity || 1),
+        notes: stockForm.notes.trim() || undefined,
+      });
+      notify('Stok hareketi ve fiziksel durum raporu başarıyla kaydedildi!', 'success');
+      setStockModalOpen(false);
+      setStockForm((prev) => ({ ...prev, quantity: 1, notes: '' }));
+      await loadAllCatalogData();
+      if (onCatalogChanged) onCatalogChanged();
+    } catch (err) {
+      notify(err.message || 'Stok raporu kaydedilemedi', 'error');
+    } finally {
+      setStockSaving(false);
     }
   };
 
@@ -643,6 +813,38 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
     return true;
   });
 
+  const pendingWorkflowItems = borrowings.filter(
+    (b) =>
+      b.status !== 'RETURNED' &&
+      (b.approval_status === 'PENDING_BORROW' || b.approval_status === 'PENDING_RETURN')
+  );
+
+  const filteredBorrowingsList = borrowings.filter((b) => {
+    if (workflowFilter === 'PENDING') {
+      return (
+        b.status !== 'RETURNED' &&
+        (b.approval_status === 'PENDING_BORROW' || b.approval_status === 'PENDING_RETURN')
+      );
+    }
+    if (workflowFilter === 'ACTIVE') {
+      return b.status !== 'RETURNED' && (b.approval_status || 'APPROVED') === 'APPROVED';
+    }
+    return true;
+  });
+
+  const filteredStockMovements = (stockSummary?.items || []).filter((m) => {
+    if (stockFilter === 'DAMAGED') {
+      return m.condition === 'DAMAGED' || m.movement_type === 'ADMIN_DAMAGE';
+    }
+    if (stockFilter === 'LOST') {
+      return m.condition === 'LOST' || m.movement_type === 'ADMIN_LOST';
+    }
+    if (stockFilter === 'RESTOCK') {
+      return m.movement_type === 'ADMIN_RESTOCK' || m.quantity_change > 0;
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Admin Header Banner */}
@@ -653,10 +855,10 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
             YETKİLİ YÖNETİCİ (ADMIN) MODÜLÜ
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-            Katalog ve Envanter Yönetim Paneli
+            Katalog, İş Akışı Onay ve Envanter Yönetim Paneli
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Kitap eklerken mevcut Yazar, Kategori ve Yayınevlerini arayarak seçebilir; listede yoksa adını yazarak anında oluşturabilirsiniz.
+            Ödünç/iade onay kuyruğunu yönetebilir, kitap bazlı okuma geçmişini ve hasar/kayıp stok raporlarını denetleyebilirsiniz.
           </p>
         </div>
 
@@ -729,7 +931,30 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
             }`}
           >
             <Clock className="w-4 h-4" />
-            Ödünç İşlemleri & Gecikme Simülasyonu ({borrowings.length})
+            Ödünç & Onay Kuyruğu ({borrowings.length})
+            {pendingWorkflowItems.length > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+                  subTab === 'borrowings'
+                    ? 'bg-white text-rose-700'
+                    : 'bg-rose-600 text-white animate-pulse'
+                }`}
+              >
+                {pendingWorkflowItems.length} Onay Bekliyor
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setSubTab('stock_reports')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              subTab === 'stock_reports'
+                ? 'bg-teal-700 text-white shadow-xs'
+                : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
+            }`}
+          >
+            <FileWarning className="w-4 h-4" />
+            Stok & Hasar/Kayıp Raporları ({stockSummary?.total_movements ?? 0})
           </button>
 
           <button
@@ -757,7 +982,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
           </button>
         </div>
 
-        {!['borrowings', 'penalties', 'logs'].includes(subTab) && (
+        {!['borrowings', 'stock_reports', 'penalties', 'logs'].includes(subTab) && (
           <button
             onClick={() =>
               openCreateModal(
@@ -782,7 +1007,181 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
               : 'Yeni Yayınevi Ekle'}
           </button>
         )}
+
+        {subTab === 'stock_reports' && (
+          <button
+            onClick={() => {
+              if (books.length > 0 && !stockForm.book_id) {
+                setStockForm((prev) => ({ ...prev, book_id: books[0].id }));
+              }
+              setStockModalOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm font-semibold shadow-sm transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Hasar / Kayıp / Stok Raporu Ekle
+          </button>
+        )}
       </div>
+
+      {/* Ödünç & Onay Kuyruğu Alt Filtre Çubuğu (subTab === 'borrowings') */}
+      {subTab === 'borrowings' && (
+        <div className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setWorkflowFilter('ALL')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                workflowFilter === 'ALL'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Tüm Kayıtlar ({borrowings.length})
+            </button>
+            <button
+              onClick={() => setWorkflowFilter('PENDING')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                workflowFilter === 'PENDING'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              Onay Bekleyen Talepler ({pendingWorkflowItems.length})
+            </button>
+            <button
+              onClick={() => setWorkflowFilter('ACTIVE')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                workflowFilter === 'ACTIVE'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Aktif Ödünçte Olanlar (
+              {
+                borrowings.filter(
+                  (b) => b.status !== 'RETURNED' && (b.approval_status || 'APPROVED') === 'APPROVED'
+                ).length
+              }
+              )
+            </button>
+          </div>
+          <span className="text-xs text-slate-500">
+            Görevli onay kuyruğundan ödünç teslimlerini onaylayabilir ve iade edilen kitapların fiziksel hasar/kayıp kontrolünü yapabilirsiniz.
+          </span>
+        </div>
+      )}
+
+      {/* Stok & Hasar/Kayıp Raporları KPI Kartları ve Filtreler (subTab === 'stock_reports') */}
+      {subTab === 'stock_reports' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-teal-50/70 border border-teal-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-teal-800 uppercase tracking-wider">
+                  Toplam Stok Hareketi
+                </span>
+                <History className="w-5 h-5 text-teal-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-slate-900 mt-2">
+                {stockSummary?.total_movements || 0} İşlem
+              </div>
+              <p className="text-[11px] text-slate-600 mt-1">
+                Ödünç, iade, hasar, kayıp ve yeni stok girişleri
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-100/70 border border-amber-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                  Hasarlı Kitap Raporları
+                </span>
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-amber-900 mt-2">
+                {stockSummary?.damaged_count || 0} Adet
+              </div>
+              <p className="text-[11px] text-amber-800/90 mt-1">
+                İade kontrolünde veya rafta tespit edilen hasarlar
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-50 to-red-100/70 border border-rose-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-rose-800 uppercase tracking-wider">
+                  Kayıp Kitap Raporları
+                </span>
+                <FileWarning className="w-5 h-5 text-rose-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-rose-900 mt-2">
+                {stockSummary?.lost_count || 0} Adet
+              </div>
+              <p className="text-[11px] text-rose-700/90 mt-1">
+                Kaybedilen ve stoktan kalıcı düşülen kitaplar
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-800 uppercase tracking-wider">
+                  Hasar / Kayıp Tazminatı
+                </span>
+                <Receipt className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-extrabold text-indigo-900 mt-2">
+                {Number(stockSummary?.total_damage_lost_penalty || 0).toFixed(2)} TL
+              </div>
+              <p className="text-[11px] text-indigo-700/90 mt-1">
+                Hasarlı ve kayıp kitaplardan yansıtılan toplam tazminat
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setStockFilter('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  stockFilter === 'ALL'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tüm Hareketler ({(stockSummary?.items || []).length})
+              </button>
+              <button
+                onClick={() => setStockFilter('DAMAGED')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  stockFilter === 'DAMAGED'
+                    ? 'bg-white text-amber-800 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Hasar Raporları ({stockSummary?.damaged_count || 0})
+              </button>
+              <button
+                onClick={() => setStockFilter('LOST')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  stockFilter === 'LOST'
+                    ? 'bg-white text-rose-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Kayıp Raporları ({stockSummary?.lost_count || 0})
+              </button>
+              <button
+                onClick={() => setStockFilter('RESTOCK')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  stockFilter === 'RESTOCK'
+                    ? 'bg-white text-emerald-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Stok Giriş / İadeler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Ödenmemiş Borçlar KPI Özet Kartları (subTab === 'penalties') */}
       {subTab === 'penalties' && (
@@ -973,7 +1372,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
 
         <div className="overflow-x-auto">
           {subTab === 'books' && (
-            <table className="w-full text-left border-collapse min-w-[720px]">
+            <table className="w-full text-left border-collapse min-w-[760px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   <th className="py-3.5 px-4">Kitap Başlığı</th>
@@ -982,7 +1381,7 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                   <th className="py-3.5 px-4">Kategoriler</th>
                   <th className="py-3.5 px-4">Yayınevi / Yıl</th>
                   <th className="py-3.5 px-4">Stok</th>
-                  <th className="py-3.5 px-4 text-right">İşlemler</th>
+                  <th className="py-3.5 px-4 text-right">İşlemler & Geçmiş</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
@@ -995,7 +1394,14 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                 ) : (
                   books.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4 font-semibold text-slate-900">{b.title}</td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900">
+                        <button
+                          onClick={() => onSelectBook && onSelectBook(b)}
+                          className="text-left hover:text-indigo-600 transition-colors cursor-pointer"
+                        >
+                          {b.title}
+                        </button>
+                      </td>
                       <td className="py-3.5 px-4 text-xs font-mono text-slate-500">{b.isbn}</td>
                       <td className="py-3.5 px-4 text-xs text-slate-600">
                         {b.authors?.length > 0
@@ -1028,7 +1434,17 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                           {b.stock_count} Adet
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-right space-x-1.5">
+                      <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                        {onSelectBook && (
+                          <button
+                            onClick={() => onSelectBook(b)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer"
+                            title="Kitap Bazlı Okuma ve Stok Geçmişini Gör"
+                          >
+                            <History className="w-3.5 h-3.5" />
+                            Okuma & Stok Geçmişi
+                          </button>
+                        )}
                         <button
                           onClick={() => openEditModal('book', b)}
                           className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
@@ -1182,32 +1598,48 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
           )}
 
           {subTab === 'borrowings' && (
-            <table className="w-full text-left border-collapse min-w-[780px]">
+            <table className="w-full text-left border-collapse min-w-[880px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   <th className="py-3.5 px-4">Kullanıcı</th>
                   <th className="py-3.5 px-4">Kitap</th>
                   <th className="py-3.5 px-4">Ödünç / Son Teslim</th>
-                  <th className="py-3.5 px-4">Durum & Gecikme</th>
-                  <th className="py-3.5 px-4">Ceza Tutarı</th>
-                  <th className="py-3.5 px-4 text-right">Canlı Sunum Test İşlemi</th>
+                  <th className="py-3.5 px-4">İş Akışı & Fiziksel Durum</th>
+                  <th className="py-3.5 px-4">Ceza / Tazminat</th>
+                  <th className="py-3.5 px-4 text-right">Görevli Onay & İşlemler</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
-                {borrowings.length === 0 ? (
+                {filteredBorrowingsList.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
-                      Henüz ödünç alma işlemi bulunmuyor.
+                      Seçilen filtreye uygun ödünç veya onay bekleyen kayıt bulunmuyor.
                     </td>
                   </tr>
                 ) : (
-                  borrowings.map((item) => {
+                  filteredBorrowingsList.map((item) => {
                     const isReturned = item.status === 'RETURNED';
-                    const isOverdue = item.status === 'OVERDUE' || (item.overdue_days || 0) > 0;
+                    const approvalStatus = item.approval_status || 'APPROVED';
+                    const isPendingBorrow = !isReturned && approvalStatus === 'PENDING_BORROW';
+                    const isPendingReturn = !isReturned && approvalStatus === 'PENDING_RETURN';
+                    const isRejected = isReturned && approvalStatus === 'REJECTED';
+                    const returnCond = item.return_condition || 'GOOD';
+                    const damagePenalty = Number(item.damage_penalty || 0);
+                    const isOverdue =
+                      !isReturned &&
+                      !isPendingBorrow &&
+                      (item.status === 'OVERDUE' || (item.overdue_days || 0) > 0);
                     const penalty = Number(item.penalty_amount || 0);
 
                     return (
-                      <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr
+                        key={item.id}
+                        className={`transition-colors ${
+                          isPendingBorrow || isPendingReturn
+                            ? 'bg-amber-50/40 hover:bg-amber-50/80'
+                            : 'hover:bg-slate-50/80'
+                        }`}
+                      >
                         <td className="py-3.5 px-4">
                           <div className="font-semibold text-slate-900">
                             {item.user_full_name || 'Kullanıcı'}
@@ -1216,10 +1648,26 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                             {item.user_email || item.user_id}
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 font-semibold text-slate-800">
-                          {item.book_title ||
-                            books.find((b) => b.id === item.book_id)?.title ||
-                            item.book_id}
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-slate-800">
+                            {item.book_title ||
+                              books.find((b) => b.id === item.book_id)?.title ||
+                              item.book_id}
+                          </div>
+                          {(item.return_notes || item.admin_notes) && (
+                            <div className="text-[11px] text-slate-500 mt-1 space-y-0.5 max-w-xs">
+                              {item.return_notes && (
+                                <div>
+                                  <strong className="text-slate-700">Üye Notu:</strong> {item.return_notes}
+                                </div>
+                              )}
+                              {item.admin_notes && (
+                                <div>
+                                  <strong className="text-indigo-700">Görevli:</strong> {item.admin_notes}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 text-xs text-slate-600 space-y-0.5">
                           <div>
@@ -1246,22 +1694,58 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                           )}
                         </td>
                         <td className="py-3.5 px-4">
-                          {isReturned ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              RETURNED (İade Edildi)
-                            </span>
-                          ) : isOverdue ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-rose-600 text-white">
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                              OVERDUE ({item.overdue_days} Gün Gecikti)
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              <Clock className="w-3.5 h-3.5" />
-                              ACTIVE
-                            </span>
-                          )}
+                          <div className="flex flex-col items-start gap-1">
+                            {isRejected ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-200 text-slate-700">
+                                <X className="w-3.5 h-3.5" />
+                                Talep Red / İptal
+                              </span>
+                            ) : isPendingBorrow ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                                <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                                Ödünç Onayı Bekliyor
+                              </span>
+                            ) : isPendingReturn ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-indigo-100 text-indigo-900 border border-indigo-300">
+                                <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                                İade Kontrolü Bekliyor
+                              </span>
+                            ) : isReturned ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                İade Edildi
+                              </span>
+                            ) : isOverdue ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-rose-600 text-white">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                GECİKMİŞ ({item.overdue_days} Gün)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <Clock className="w-3.5 h-3.5" />
+                                Aktif Ödünç
+                              </span>
+                            )}
+
+                            {(isPendingReturn || isReturned) && !isRejected && (
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                  returnCond === 'DAMAGED'
+                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                    : returnCond === 'LOST'
+                                    ? 'bg-rose-100 text-rose-900 border-rose-300'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                }`}
+                              >
+                                Fiziksel Durum:{' '}
+                                {returnCond === 'DAMAGED'
+                                  ? 'Hasarlı'
+                                  : returnCond === 'LOST'
+                                  ? 'Kayıp'
+                                  : 'Sağlam'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4">
                           {penalty > 0 ? (
@@ -1269,6 +1753,11 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                               <span className="font-extrabold text-rose-700 text-xs block">
                                 {penalty.toFixed(2)} TL
                               </span>
+                              {damagePenalty > 0 && (
+                                <span className="text-[10px] text-slate-500 block">
+                                  ({damagePenalty.toFixed(0)} TL {returnCond === 'LOST' ? 'Kayıp' : 'Hasar'})
+                                </span>
+                              )}
                               <span
                                 className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${
                                   item.is_penalty_paid
@@ -1289,23 +1778,161 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                             <span className="text-xs text-slate-400">0.00 TL</span>
                           )}
                         </td>
-                        <td className="py-3.5 px-4 text-right">
-                          {!isReturned ? (
-                            <button
-                              onClick={() => handleSimulateOverdue(item.id)}
-                              disabled={simulatingId === item.id}
-                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
-                            >
-                              <FastForward className="w-3.5 h-3.5" />
-                              {simulatingId === item.id
-                                ? 'Simüle Ediliyor...'
-                                : 'Gecikme Simüle Et (-5 Gün)'}
-                            </button>
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          {isPendingBorrow ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleApproveBorrow(item)}
+                                disabled={processingWorkflowId === item.id}
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                Ödüncü Onayla
+                              </button>
+                              <button
+                                onClick={() => handleRejectBorrow(item)}
+                                disabled={processingWorkflowId === item.id}
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 disabled:opacity-60 text-rose-700 border border-rose-200 text-xs font-bold transition-colors cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Reddet (+1 Stok)
+                              </button>
+                            </div>
+                          ) : !isReturned ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                onClick={() => openInspectReturnModal(item)}
+                                disabled={processingWorkflowId === item.id}
+                                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer ${
+                                  isPendingReturn
+                                    ? 'bg-indigo-600 hover:bg-indigo-700 ring-2 ring-indigo-200'
+                                    : 'bg-teal-600 hover:bg-teal-700'
+                                }`}
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                {isPendingReturn
+                                  ? 'Fiziksel Kontrol & İade Onayla'
+                                  : 'İade Al / Durum Raporla'}
+                              </button>
+                              {!isPendingReturn && (
+                                <button
+                                  onClick={() => handleSimulateOverdue(item.id)}
+                                  disabled={simulatingId === item.id}
+                                  title="Canlı Sunum İçin Gecikme Simüle Et (-5 Gün)"
+                                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                                >
+                                  <FastForward className="w-3.5 h-3.5" />
+                                  {simulatingId === item.id ? '...' : '-5 Gün'}
+                                </button>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-xs text-slate-400 italic">
-                              İade tamamlandı
+                              {isRejected ? 'Talep kapatıldı' : 'İade tamamlandı'}
                             </span>
                           )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {/* Stok Geçmişi & Hasar/Kayıp Raporları Tablosu */}
+          {subTab === 'stock_reports' && (
+            <table className="w-full text-left border-collapse min-w-[820px]">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <th className="py-3.5 px-4">Tarih / Saat</th>
+                  <th className="py-3.5 px-4">Kitap</th>
+                  <th className="py-3.5 px-4">Hareket Türü</th>
+                  <th className="py-3.5 px-4">Fiziksel Durum</th>
+                  <th className="py-3.5 px-4">Stok Değişimi</th>
+                  <th className="py-3.5 px-4">Üye / Tazminat</th>
+                  <th className="py-3.5 px-4">Rapor & Notlar</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {filteredStockMovements.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-10 text-center text-slate-400 text-xs">
+                      Seçilen filtreye uygun stok hareketi veya hasar/kayıp raporu bulunmuyor.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredStockMovements.map((m) => {
+                    const bookObj = books.find((b) => b.id === m.book_id);
+                    const isDamage = m.condition === 'DAMAGED' || m.movement_type === 'ADMIN_DAMAGE';
+                    const isLost = m.condition === 'LOST' || m.movement_type === 'ADMIN_LOST';
+
+                    return (
+                      <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4 text-xs font-mono text-slate-600 whitespace-nowrap">
+                          {formatTimestamp(m.created_at)}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <button
+                            onClick={() => bookObj && onSelectBook && onSelectBook(bookObj)}
+                            className="font-semibold text-slate-900 hover:text-indigo-600 text-left cursor-pointer block"
+                          >
+                            {m.book_title || bookObj?.title || m.book_id}
+                          </button>
+                          <span className="text-[11px] font-mono text-slate-400">
+                            ISBN: {m.book_isbn || bookObj?.isbn || '-'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                            {m.movement_type}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {isLost ? (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                              Kayıp (LOST)
+                            </span>
+                          ) : isDamage ? (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              Hasarlı (DAMAGED)
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              Sağlam (GOOD)
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap text-xs font-mono">
+                          <span
+                            className={`font-extrabold px-2 py-0.5 rounded-md mr-1.5 ${
+                              m.quantity_change > 0
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : m.quantity_change < 0
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {m.quantity_change > 0 ? `+${m.quantity_change}` : m.quantity_change}
+                          </span>
+                          <span className="text-slate-500">
+                            ({m.stock_before} &rarr; <strong>{m.stock_after}</strong>)
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs">
+                          {m.user_full_name ? (
+                            <div className="font-semibold text-slate-800">{m.user_full_name}</div>
+                          ) : (
+                            <span className="text-slate-400">Admin Envanter İşlemi</span>
+                          )}
+                          {m.penalty_added > 0 && (
+                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800">
+                              +{Number(m.penalty_added).toFixed(2)} TL Tazminat
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs">
+                          {m.notes || '-'}
                         </td>
                       </tr>
                     );
@@ -2060,6 +2687,311 @@ export default function AdminPanel({ notify, onCatalogChanged }) {
                   className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white shadow-xs cursor-pointer"
                 >
                   {saving ? 'Kaydediliyor...' : editingItem ? 'Güncelle' : 'Kaydet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: İade Fiziksel Kontrol & Onay Modalı */}
+      {inspectModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                    Görevli İade Fiziksel Kontrol & Onay
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {inspectModalItem.user_full_name} • {inspectModalItem.book_title}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectModalItem(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleApproveReturnSubmit} className="p-6 space-y-4">
+              {inspectModalItem.return_notes && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                  <strong className="block mb-0.5">Üyenin İade Bildirimi / Notu:</strong>
+                  "{inspectModalItem.return_notes}"
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">
+                  Kitabın Fiziksel Kontrol Sonucu
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      inspectCondition === 'GOOD'
+                        ? 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-200'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="inspectCondition"
+                      checked={inspectCondition === 'GOOD'}
+                      onChange={() => {
+                        setInspectCondition('GOOD');
+                        setInspectDamagePenalty(0);
+                        setInspectWithdrawFromStock(false);
+                      }}
+                      className="mt-1"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold text-slate-900 block">
+                        Sağlam (GOOD) — Rafa Geri Ekle (+1 Stok)
+                      </span>
+                      <span className="text-slate-500">
+                        Kitap eksiksiz ve hasarsız teslim alındı, stok adedi +1 artırılır.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      inspectCondition === 'DAMAGED'
+                        ? 'bg-amber-50 border-amber-400 ring-1 ring-amber-200'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="inspectCondition"
+                      checked={inspectCondition === 'DAMAGED'}
+                      onChange={() => {
+                        setInspectCondition('DAMAGED');
+                        setInspectDamagePenalty(100);
+                      }}
+                      className="mt-1"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold text-amber-950 block">
+                        Hasar Görmüş (DAMAGED) — Hasar Raporu & Tazminat
+                      </span>
+                      <span className="text-amber-800">
+                        Kitap hasarlı iade edildi. Hasar geçmişine kaydedilir ve üyeye tazminat yansıtılır.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      inspectCondition === 'LOST'
+                        ? 'bg-rose-50 border-rose-400 ring-1 ring-rose-200'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="inspectCondition"
+                      checked={inspectCondition === 'LOST'}
+                      onChange={() => {
+                        setInspectCondition('LOST');
+                        setInspectDamagePenalty(250);
+                        setInspectWithdrawFromStock(true);
+                      }}
+                      className="mt-1"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold text-rose-950 block">
+                        Kayıp Kitap (LOST) — Stoktan Kalıcı Düş & Kayıp Tazminatı
+                      </span>
+                      <span className="text-rose-800">
+                        Kitap rafa dönmez (stok artırılmaz), kayıp raporu oluşturulur ve tazminat yansıtılır.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {inspectCondition !== 'GOOD' && (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Üyeye Yansıtılacak Ek Hasar / Kayıp Tazminatı (TL)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="10"
+                      value={inspectDamagePenalty}
+                      onChange={(e) => setInspectDamagePenalty(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-sm font-bold text-rose-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {inspectCondition === 'DAMAGED' && (
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={inspectWithdrawFromStock}
+                        onChange={(e) => setInspectWithdrawFromStock(e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      Hasar ağır olduğu için kitabı onarıma ayır (Rafa geri ekleme / stok artmasın)
+                    </label>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Görevli Kontrol Notu (Stok ve Okuma Geçmişinde Görünür)
+                </label>
+                <textarea
+                  rows={2}
+                  value={inspectAdminNotes}
+                  onChange={(e) => setInspectAdminNotes(e.target.value)}
+                  placeholder="Örn: Fiziksel kontrol yapıldı, cilt sağlam / 45. sayfada yırtık tespit edildi..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setInspectModalItem(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={processingWorkflowId === inspectModalItem.id}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white shadow-sm cursor-pointer"
+                >
+                  {processingWorkflowId === inspectModalItem.id
+                    ? 'Onaylanıyor...'
+                    : 'Kontrolü Tamamla & İadeyi Onayla'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: Manuel Hasar / Kayıp / Stok Raporu Ekleme Modalı */}
+      {stockModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center">
+                  <FileWarning className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                    Envanter Stok & Hasar / Kayıp Raporu Oluştur
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Raf sayımı, hasarlı kitap ayırma, kayıp düşümü veya yeni stok girişi
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setStockModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateStockMovementSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  İlgili Kitap *
+                </label>
+                <select
+                  required
+                  value={stockForm.book_id}
+                  onChange={(e) => setStockForm({ ...stockForm, book_id: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  <option value="">Kitap Seçiniz...</option>
+                  {books.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.title} (Mevcut Stok: {b.stock_count} Adet • ISBN: {b.isbn})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Rapor / İşlem Türü *
+                  </label>
+                  <select
+                    value={stockForm.movement_type}
+                    onChange={(e) =>
+                      setStockForm({ ...stockForm, movement_type: e.target.value })
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="ADMIN_DAMAGE">Hasarlı Kitap Raporu (Stoktan Düş)</option>
+                    <option value="ADMIN_LOST">Kayıp Kitap Raporu (Stoktan Düş)</option>
+                    <option value="ADMIN_RESTOCK">Yeni Stok / Onarım Girişi (Stok Artır)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Adet *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    required
+                    value={stockForm.quantity}
+                    onChange={(e) => setStockForm({ ...stockForm, quantity: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Rapor Açıklaması / Tutanak Notu *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={stockForm.notes}
+                  onChange={(e) => setStockForm({ ...stockForm, notes: e.target.value })}
+                  placeholder="Örn: Raf sayımında 1 nüshanın su teması nedeniyle hasar gördüğü tespit edilerek ciltlemeye ayrıldı..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setStockModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={stockSaving}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white shadow-sm cursor-pointer"
+                >
+                  {stockSaving ? 'Kaydediliyor...' : 'Raporu Kaydet & Stoğu Güncelle'}
                 </button>
               </div>
             </form>

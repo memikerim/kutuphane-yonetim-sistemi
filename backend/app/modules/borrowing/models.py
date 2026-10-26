@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, func, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.base_model import Base, UUIDPrimaryKeyMixin
@@ -64,6 +64,17 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     is_penalty_paid: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    approval_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="APPROVED", server_default="APPROVED"
+    )
+    return_condition: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="GOOD", server_default="GOOD"
+    )
+    damage_penalty: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    return_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    admin_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="borrowings", lazy="selectin")
     book: Mapped["Book"] = relationship(back_populates="borrowings", lazy="selectin")
@@ -75,8 +86,11 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
         if self.status == BorrowingStatus.RETURNED:
             if self.return_date and self.due_date and self.return_date > self.due_date:
                 return (self.return_date - self.due_date).days
-            if self.penalty_amount and self.penalty_amount > 0 and settings.DAILY_PENALTY_RATE > 0:
-                return int(round(self.penalty_amount / settings.DAILY_PENALTY_RATE))
+            overdue_part = max(0.0, float(self.penalty_amount or 0.0) - float(self.damage_penalty or 0.0))
+            if overdue_part > 0 and settings.DAILY_PENALTY_RATE > 0:
+                return int(round(overdue_part / settings.DAILY_PENALTY_RATE))
+            return 0
+        if self.approval_status == "PENDING_BORROW":
             return 0
         today = date.today()
         if self.due_date and today > self.due_date:
@@ -94,6 +108,10 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     @property
     def book_title(self) -> str | None:
         return self.book.title if self.book else None
+
+    @property
+    def book_isbn(self) -> str | None:
+        return self.book.isbn if self.book else None
 
 
 
@@ -242,5 +260,66 @@ class Reservation(UUIDPrimaryKeyMixin, Base):
             "Rezerve listesinde 1. sıradasınız. "
             "Kitap ödünç alınma stoğuna girdiği anda (giriş yapmanıza gerek olmadan) 24 saatlik ödünç alma süreniz otomatik başlar."
         )
+
+
+class StockMovement(UUIDPrimaryKeyMixin, Base):
+    """Kitap stok hareketleri, fiziksel durum kontrolleri, hasar ve kayıp raporları."""
+
+    __tablename__ = "stock_movements"
+
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    borrowing_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("borrowings.id", ondelete="SET NULL"), nullable=True
+    )
+    movement_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="RETURN_GOOD"
+    )
+    condition: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="GOOD"
+    )
+    quantity_change: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stock_before: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stock_after: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    penalty_added: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    book: Mapped["Book"] = relationship(lazy="selectin")
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id], lazy="selectin")
+    admin: Mapped["User | None"] = relationship(foreign_keys=[admin_id], lazy="selectin")
+
+    @property
+    def book_title(self) -> str | None:
+        return self.book.title if self.book else None
+
+    @property
+    def book_isbn(self) -> str | None:
+        return self.book.isbn if self.book else None
+
+    @property
+    def user_full_name(self) -> str | None:
+        return f"{self.user.first_name} {self.user.last_name}" if self.user else None
+
+    @property
+    def user_email(self) -> str | None:
+        return self.user.email if self.user else None
+
+    @property
+    def admin_full_name(self) -> str | None:
+        return f"{self.admin.first_name} {self.admin.last_name}" if self.admin else None
+
 
 

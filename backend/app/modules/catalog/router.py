@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.database import DbSession
 from app.modules.auth.dependencies import require_roles
 from app.modules.auth.models import RoleName
+from app.modules.borrowing import service as borrowing_service
+from app.modules.borrowing.schemas import BookHistoryResponse
 from app.modules.catalog import service
 from app.modules.catalog.schemas import (
     AuthorCreate,
@@ -162,6 +164,18 @@ def lookup_isbn(isbn: str, db: DbSession, admin: AdminDep):
 @router.get("/books/{id}", response_model=BookRead, summary="Kitap detay")
 def get_book(id: uuid.UUID, db: DbSession):
     return handle_service_error(service.get_book, db, id)
+
+
+@router.get(
+    "/books/{id}/history",
+    response_model=BookHistoryResponse,
+    summary="Kitap bazlı okuma geçmişi ve stok/hasar/kayıp raporları",
+)
+def get_book_history(id: uuid.UUID, db: DbSession):
+    try:
+        return borrowing_service.get_book_history(db, id)
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 @router.post("/books", response_model=BookRead, status_code=status.HTTP_201_CREATED, summary="Kitap ekle (ADMIN)")

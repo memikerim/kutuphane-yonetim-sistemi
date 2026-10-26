@@ -160,6 +160,13 @@ export default function App() {
     fetchBooks();
   }, [fetchBooks]);
 
+  // Sekme tekrar Katalog'a geçtiğinde stok ve rezervasyon sayılarını anında tazele
+  useEffect(() => {
+    if (activeTab === 'catalog') {
+      fetchBooks();
+    }
+  }, [activeTab, fetchBooks]);
+
   const handleResetFilters = () => {
     setSearch('');
     setCategoryFilter('');
@@ -641,12 +648,14 @@ export default function App() {
           <MyLibraryView
             notify={notify}
             onSelectBook={(b) => setSelectedBook(b)}
+            onCatalogChanged={() => fetchBooks()}
           />
         )}
 
         {activeTab === 'admin' && user?.roles?.includes('ADMIN') && (
           <AdminPanel
             notify={notify}
+            onSelectBook={(b) => setSelectedBook(b)}
             onCatalogChanged={() => {
               sessionStorage.removeItem('kutuphane_metadata');
               fetchFilterMetadata(true);
@@ -678,9 +687,17 @@ export default function App() {
         <BookDetailModal
           book={selectedBook}
           user={user}
-          onClose={() => setSelectedBook(null)}
+          onClose={() => {
+            setSelectedBook(null);
+            fetchBooks();
+          }}
           onOpenAuth={(mode) => setAuthModalMode(mode)}
-          onBookUpdated={() => fetchBooks()}
+          onBookUpdated={(freshBook) => {
+            if (freshBook && freshBook.id) {
+              setSelectedBook(freshBook);
+            }
+            fetchBooks();
+          }}
           notify={notify}
         />
       )}

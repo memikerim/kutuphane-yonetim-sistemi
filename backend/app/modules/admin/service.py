@@ -54,18 +54,22 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                         due_date=_to_date(b.due_date),
                         return_date=_to_date(b.return_date),
                         status="RETURNED",
+                        return_condition=b.return_condition or "GOOD",
+                        damage_penalty=float(b.damage_penalty or 0.0),
                         overdue_days=max(0, overdue_days),
                         penalty_amount=penalty,
                         is_penalty_paid=False,
                     )
                 )
         else:
+            if b.approval_status == "PENDING_BORROW":
+                continue
             # Aktif ve süresi geçmiş (OVERDUE)
             due_d = _to_date(b.due_date)
             is_overdue = b.status == BorrowingStatus.OVERDUE or (due_d is not None and today > due_d)
             if is_overdue and not b.is_penalty_paid:
                 overdue_days = b.overdue_days or (max(1, (today - due_d).days) if due_d else 1)
-                penalty = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+                penalty = round(overdue_days * settings.DAILY_PENALTY_RATE + float(b.damage_penalty or 0.0), 2)
                 total_unpaid += penalty
                 items.append(
                     UnpaidPenaltyItem(
@@ -79,6 +83,8 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                         due_date=due_d,
                         return_date=None,
                         status="OVERDUE",
+                        return_condition=b.return_condition or "GOOD",
+                        damage_penalty=float(b.damage_penalty or 0.0),
                         overdue_days=overdue_days,
                         penalty_amount=penalty,
                         is_penalty_paid=False,

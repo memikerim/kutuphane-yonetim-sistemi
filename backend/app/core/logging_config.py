@@ -11,6 +11,8 @@ _audit_logs: deque[dict[str, Any]] = deque(maxlen=200)
 
 def _persist_log_entry(entry: dict[str, Any]) -> None:
     """Log kaydını veritabanına kalıcı olarak kaydeder."""
+    if "pytest" in sys.modules:
+        return
     try:
         from app.core.database import SessionLocal
         from app.modules.admin.models import SystemLog
@@ -36,6 +38,8 @@ def _persist_log_entry(entry: dict[str, Any]) -> None:
 
 def load_persisted_logs() -> None:
     """Sunucu yeniden başladığında son 200 log kaydını veritabanından hafızaya geri yükler."""
+    if "pytest" in sys.modules:
+        return
     try:
         from app.core.database import SessionLocal
         from app.modules.admin.models import SystemLog
