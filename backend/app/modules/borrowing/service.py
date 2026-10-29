@@ -24,6 +24,8 @@ from app.modules.borrowing.schemas import (
     BookReadingRecord,
     BorrowingCreate,
     BorrowingReturn,
+    NotificationItem,
+    NotificationSummaryResponse,
     ReservationCreate,
     StockMovementCreate,
     StockMovementRead,
@@ -1286,6 +1288,274 @@ def get_book_history(db: Session, book_id: uuid.UUID) -> BookHistoryResponse:
         reading_history=reading_records,
         stock_movements=[_normalize_stock_movement_read(m) for m in movements],
     )
+
+
+def get_user_and_admin_notifications(
+    db: Session, user: User
+) -> NotificationSummaryResponse:
+    """
+    Kullanıcı ve Yönetici için aksiyon gerektiren bildirimleri ve kısa özetleri döner:
+    - Normal Kullanıcı:
+      * Sırası gelen rezervasyonlar (can_borrow_now == True) -> 'Rezervasyon sıranız geldi, ödünç alabilirsiniz'
+      * Süresi geçmiş kitaplar (OVERDUE veya due_date < today) -> 'İade etme tarihiniz geçti'
+      * Ödenmemiş gecikme/hasar borçları -> 'Ceza ödemesi yapılması gerekiyor'
+      * Yönetici onayı bekleyen ödemeler -> 'Ceza ödemeniz onay bekliyor'
+      * Onay bekleyen ödünç ve iade talepleri
+      * Ban / hesap kısıtlama durumu
+    - Yönetici (ADMIN):
+      * Onay bekleyen ceza/tazminat ödemeleri (kullanıcı ödedi, görevli onayı bekliyor)
+      * İade onayı bekleyen kitaplar (kullanıcı iade etti, hasar/fiziksel kontrol onayı bekliyor)
+      * Ödünç talebi onayı bekleyenler (kullanıcı ödünç istedi, teslim onayı bekliyor)
+    """
+    sync_overdue_borrowings(db, user.id)
+    sync_reservations(db)
+
+    is_admin = any(
+        (
+            r.name == RoleName.ADMIN
+            or str(r.name) == "ADMIN"
+            or getattr(r.name, "value", None) == "ADMIN"
+        )
+        for r in (user.roles or [])
+    )
+
+    today = date.today()
+    items: list[NotificationItem] = []
+
+    # 1. KULLANICI BİLDİRİMLERİ
+    # A) Ban / Hesap Kısıtlaması
+    if getattr(user, "is_banned", False):
+        ban_msg = getattr(user, "ban_reason", None) or (
+            "Kitap iadeniz ve borç ödemeniz yapılana kadar yeni kitap ödünç, rezervasyon ve yorum işlemleriniz kısıtlanmıştır."
+        )
+        items.append(
+            NotificationItem(
+                id=f"user-ban-{user.id}",
+                target="USER",
+                type="BANNED",
+                severity="error",
+                title="Hesabınız Kısıtlanmıştır (Banlı)",
+                message=ban_msg,
+                action_type="VIEW_ACCOUNT_STATUS",
+                meta={"ban_reason": ban_msg},
+            )
+        )
+
+    # B) Rezervasyon Sırası Gelenler (can_borrow_now)
+    user_reservations = list(
+        db.scalars(
+            select(Reservation).where(
+                Reservation.user_id == user.id,
+                Reservation.status == ReservationStatus.PENDING,
+            )
+        ).all()
+    )
+    for r in user_reservations:
+        if r.can_borrow_now:
+            rem_sec = r.remaining_seconds
+            rem_str = ""
+            if rem_sec is not None and rem_sec > 0:
+                hours = rem_sec // 3600
+                mins = (rem_sec % 3600) // 60
+                rem_str = f" (Kalan Süre: {hours} sa {mins} dk)"
+            book_title = r.book.title if r.book else "Kitap"
+            items.append(
+                NotificationItem(
+                    id=f"user-res-{r.id}",
+                    target="USER",
+                    type="RESERVATION_READY",
+                    severity="success",
+                    title="Rezervasyon Sıranız Geldi!",
+                    message=f"'{book_title}' kitabı için ödünç alma sırası size geldi{rem_str}. 24 saatlik süre dolmadan hemen ödünç alabilirsiniz.",
+                    action_type="BORROW_RESERVED",
+                    meta={
+                        "reservation_id": str(r.id),
+                        "book_id": str(r.book_id),
+                        "book_title": book_title,
+                    },
+                )
+            )
+
+    # C) Kullanıcının Ödünçleri
+    user_borrowings = list(
+        db.scalars(
+            select(Borrowing)
+            .where(Borrowing.user_id == user.id)
+            .order_by(Borrowing.borrow_date.desc(), Borrowing.id.desc())
+        ).all()
+    )
+    for b in user_borrowings:
+        b_title = b.book.title if b.book else "Kitap"
+        due_d = b.due_date.date() if hasattr(b.due_date, "date") else b.due_date
+        approval_st = b.approval_status or "APPROVED"
+        payment_st = getattr(b, "penalty_payment_status", "UNPAID")
+        penalty_amt = float(b.penalty_amount or 0.0)
+
+        # C1) Onay Bekleyen Ceza Ödemesi (Kullanıcı ödedi, görevli onayı bekliyor)
+        if payment_st == "PENDING_APPROVAL":
+            items.append(
+                NotificationItem(
+                    id=f"user-pay-wait-{b.id}",
+                    target="USER",
+                    type="PAYMENT_PENDING_APPROVAL",
+                    severity="warning",
+                    title="Ceza Ödemeniz Onay Bekliyor",
+                    message=f"'{b_title}' için yaptığınız {penalty_amt:.2f} TL ödeme görevli onayı beklemektedir. Görevli onaylayana kadar yeni ödünç/rezervasyon yapılamaz.",
+                    action_type="VIEW_PAYMENT_STATUS",
+                    meta={"borrowing_id": str(b.id), "amount": penalty_amt, "book_title": b_title},
+                )
+            )
+        # C2) Ödenmemiş Ceza / Borç
+        elif penalty_amt > 0 and not b.is_penalty_paid:
+            cond = (b.return_condition or "GOOD").upper()
+            cond_desc = "hasar/kayıp tazminatı" if cond in ("DAMAGED", "LOST") else "gecikme cezası"
+            items.append(
+                NotificationItem(
+                    id=f"user-penalty-due-{b.id}",
+                    target="USER",
+                    type="PENALTY_DUE",
+                    severity="error",
+                    title="Ceza / Borç Ödemesi Gerekiyor",
+                    message=f"'{b_title}' için {penalty_amt:.2f} TL ödenmemiş {cond_desc} borcunuz bulunmaktadır. Lütfen borcunuzu ödeyiniz.",
+                    action_type="PAY_PENALTY",
+                    meta={"borrowing_id": str(b.id), "amount": penalty_amt, "book_title": b_title},
+                )
+            )
+
+        # C3) Süresi Geçmiş Kitap
+        if b.status != BorrowingStatus.RETURNED and approval_st != "PENDING_BORROW":
+            if b.status == BorrowingStatus.OVERDUE or (due_d is not None and today > due_d):
+                days_over = max(1, (today - due_d).days) if due_d else 1
+                items.append(
+                    NotificationItem(
+                        id=f"user-overdue-{b.id}",
+                        target="USER",
+                        type="OVERDUE_BOOK",
+                        severity="error",
+                        title="İade Etme Tarihiniz Geçti!",
+                        message=f"'{b_title}' kitabının iade tarihi {days_over} gün gecikmiştir. Günlük 10 TL gecikme cezası uygulanmaktadır. Lütfen iade ediniz.",
+                        action_type="RETURN_BOOK",
+                        meta={"borrowing_id": str(b.id), "book_title": b_title, "overdue_days": days_over},
+                    )
+                )
+
+        # C4) Görevli Onayında Bekleyen Ödünç Talebi
+        if b.status != BorrowingStatus.RETURNED and approval_st == "PENDING_BORROW":
+            items.append(
+                NotificationItem(
+                    id=f"user-borrow-pend-{b.id}",
+                    target="USER",
+                    type="PENDING_BORROW",
+                    severity="info",
+                    title="Ödünç Talebiniz Onay Bekliyor",
+                    message=f"'{b_title}' ödünç alma talebiniz kütüphane görevlisinin teslim onayını bekliyor.",
+                    action_type="VIEW_BORROW_STATUS",
+                    meta={"borrowing_id": str(b.id), "book_title": b_title},
+                )
+            )
+
+        # C5) Görevli Kontrolünde Bekleyen İade Talebi
+        if b.status != BorrowingStatus.RETURNED and approval_st == "PENDING_RETURN":
+            items.append(
+                NotificationItem(
+                    id=f"user-return-pend-{b.id}",
+                    target="USER",
+                    type="PENDING_RETURN",
+                    severity="info",
+                    title="Kitap İadeniz Görevli Kontrolünde",
+                    message=f"'{b_title}' iade talebiniz görevlinin fiziksel durum kontrolü ve onayını bekliyor.",
+                    action_type="VIEW_RETURN_STATUS",
+                    meta={"borrowing_id": str(b.id), "book_title": b_title},
+                )
+            )
+
+    user_action_count = len(items)
+
+    # 2. YÖNETİCİ BİLDİRİMLERİ (Yalnızca Admin Kullanıcı İçin)
+    admin_pending_payments = 0
+    admin_pending_returns = 0
+    admin_pending_borrows = 0
+    admin_items: list[NotificationItem] = []
+
+    if is_admin:
+        all_borrowings = list(
+            db.scalars(
+                select(Borrowing).order_by(Borrowing.borrow_date.desc(), Borrowing.id.desc())
+            ).all()
+        )
+
+        for b in all_borrowings:
+            u_name = f"{b.user.first_name} {b.user.last_name}" if b.user else "Kullanıcı"
+            b_title = b.book.title if b.book else "Kitap"
+            appr_st = b.approval_status or "APPROVED"
+            pay_st = getattr(b, "penalty_payment_status", "UNPAID")
+            pen_amt = float(b.penalty_amount or 0.0)
+
+            # A) Onay Bekleyen Ceza Ödemeleri
+            if pay_st == "PENDING_APPROVAL":
+                admin_pending_payments += 1
+                admin_items.append(
+                    NotificationItem(
+                        id=f"admin-pay-{b.id}",
+                        target="ADMIN",
+                        type="ADMIN_PENDING_PAYMENT",
+                        severity="warning",
+                        title="Ceza Ödemesi Onay Bekliyor",
+                        message=f"{u_name} adlı kullanıcı '{b_title}' için {pen_amt:.2f} TL ödeme yaptı. Onaylamanızı bekliyor.",
+                        action_type="ADMIN_APPROVE_PAYMENT",
+                        meta={"borrowing_id": str(b.id), "user_name": u_name, "amount": pen_amt, "book_title": b_title},
+                    )
+                )
+
+            # B) İade Onayı Bekleyen Kitaplar
+            if b.status != BorrowingStatus.RETURNED and appr_st == "PENDING_RETURN":
+                admin_pending_returns += 1
+                cond = (b.return_condition or "GOOD").upper()
+                cond_tr = "Kayıp Bildirimi" if cond == "LOST" else "Hasarlı Bildirimi" if cond == "DAMAGED" else "Normal İade"
+                admin_items.append(
+                    NotificationItem(
+                        id=f"admin-ret-{b.id}",
+                        target="ADMIN",
+                        type="ADMIN_PENDING_RETURN",
+                        severity="warning",
+                        title="Kullanıcı Kitap İadesi Onayı Bekliyor",
+                        message=f"{u_name}, '{b_title}' kitabını teslim etti ({cond_tr}). Fiziksel durum kontrolü ve iade onayı bekliyor.",
+                        action_type="ADMIN_APPROVE_RETURN",
+                        meta={"borrowing_id": str(b.id), "user_name": u_name, "book_title": b_title, "condition": cond},
+                    )
+                )
+
+            # C) Ödünç Talebi Onayı Bekleyenler
+            if b.status != BorrowingStatus.RETURNED and appr_st == "PENDING_BORROW":
+                admin_pending_borrows += 1
+                admin_items.append(
+                    NotificationItem(
+                        id=f"admin-borrow-{b.id}",
+                        target="ADMIN",
+                        type="ADMIN_PENDING_BORROW",
+                        severity="info",
+                        title="Yeni Ödünç Talebi Onay Bekliyor",
+                        message=f"{u_name}, '{b_title}' kitabı için ödünç talebi oluşturdu. Kitabın teslim edilip onaylanması bekleniyor.",
+                        action_type="ADMIN_APPROVE_BORROW",
+                        meta={"borrowing_id": str(b.id), "user_name": u_name, "book_title": b_title},
+                    )
+                )
+
+        items.extend(admin_items)
+
+    admin_action_count = len(admin_items)
+    total_count = user_action_count + admin_action_count
+
+    return NotificationSummaryResponse(
+        total_count=total_count,
+        user_action_count=user_action_count,
+        admin_action_count=admin_action_count,
+        pending_penalty_approvals=admin_pending_payments,
+        pending_return_approvals=admin_pending_returns,
+        pending_borrow_approvals=admin_pending_borrows,
+        items=items,
+    )
+
 
 
 

@@ -203,6 +203,9 @@ export const api = {
   },
 
 
+  // Notifications
+  getNotifications: () => request('/notifications'),
+
   // Reservations
   getMyReservations: () => request('/reservations'),
   createReservation: (data) =>

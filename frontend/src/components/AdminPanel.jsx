@@ -30,8 +30,14 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 
-export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
-  const [subTab, setSubTab] = useState('books');
+export default function AdminPanel({
+  notify,
+  onCatalogChanged,
+  onSelectBook,
+  initialSubTab,
+  initialFilter,
+}) {
+  const [subTab, setSubTab] = useState(initialSubTab || 'books');
   const [loading, setLoading] = useState(true);
 
   const [books, setBooks] = useState([]);
@@ -45,8 +51,23 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
   const [banReasonInput, setBanReasonInput] = useState('');
   const [banSubmitting, setBanSubmitting] = useState(false);
   const [simulatingId, setSimulatingId] = useState(null);
-  const [workflowFilter, setWorkflowFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'ACTIVE'
+  const [workflowFilter, setWorkflowFilter] = useState(
+    initialSubTab === 'workflow' && initialFilter ? initialFilter : 'ALL'
+  ); // 'ALL' | 'PENDING' | 'RETURNS' | 'BORROWS' | 'ACTIVE'
   const [processingWorkflowId, setProcessingWorkflowId] = useState(null);
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+    if (initialFilter) {
+      if (initialSubTab === 'workflow') {
+        setWorkflowFilter(initialFilter);
+      } else if (initialSubTab === 'penalties') {
+        setPenaltyStatusFilter(initialFilter);
+      }
+    }
+  }, [initialSubTab, initialFilter]);
 
   // Admin İade Fiziksel Kontrol & Onay Modalı State'leri
   const [inspectModalItem, setInspectModalItem] = useState(null);
@@ -893,6 +914,12 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
   );
 
   const filteredBorrowingsList = borrowings.filter((b) => {
+    if (workflowFilter === 'RETURNS') {
+      return b.status !== 'RETURNED' && b.approval_status === 'PENDING_RETURN';
+    }
+    if (workflowFilter === 'BORROWS') {
+      return b.status !== 'RETURNED' && b.approval_status === 'PENDING_BORROW';
+    }
     if (workflowFilter === 'PENDING') {
       return (
         b.status !== 'RETURNED' &&
@@ -1140,7 +1167,27 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                   : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
               }`}
             >
-              Onay Bekleyen Talepler ({pendingWorkflowItems.length})
+              Tüm Onay Bekleyenler ({pendingWorkflowItems.length})
+            </button>
+            <button
+              onClick={() => setWorkflowFilter('RETURNS')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                workflowFilter === 'RETURNS'
+                  ? 'bg-amber-700 text-white shadow-xs'
+                  : 'bg-amber-50/70 text-amber-800 hover:bg-amber-100'
+              }`}
+            >
+              İade Onayları ({borrowings.filter((b) => b.status !== 'RETURNED' && b.approval_status === 'PENDING_RETURN').length})
+            </button>
+            <button
+              onClick={() => setWorkflowFilter('BORROWS')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                workflowFilter === 'BORROWS'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+              }`}
+            >
+              Ödünç Talepleri ({borrowings.filter((b) => b.status !== 'RETURNED' && b.approval_status === 'PENDING_BORROW').length})
             </button>
             <button
               onClick={() => setWorkflowFilter('ACTIVE')}

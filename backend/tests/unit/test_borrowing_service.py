@@ -845,6 +845,66 @@ def test_penalty_payment_requires_admin_approval_before_borrowing_or_reservation
     assert new_borrow.id is not None
 
 
+def test_user_and_admin_notifications_center(db_session, test_user, test_book):
+    """
+    Hem kullanıcı hem de yönetici bildirim merkezinin (aksiyon listesi ve özetlerinin)
+    doğru hesaplandığını test eder.
+    """
+    from app.modules.auth.models import Role, RoleName
+    from app.modules.catalog.models import Book
+
+    admin_role = db_session.scalar(select(Role).where(Role.name == RoleName.ADMIN))
+    admin_user = User(
+        email="notify_admin@kutuphane.com",
+        password_hash="hashed",
+        first_name="Bildirim",
+        last_name="Yöneticisi",
+        roles=[admin_role] if admin_role else [],
+    )
+    db_session.add(admin_user)
+
+    book_res = Book(
+        title="Rezerve Kitap",
+        isbn="9789750000777",
+        published_year=2023,
+        stock_count=1,
+    )
+    db_session.add(book_res)
+    db_session.commit()
+
+    # 1. Kullanıcı için rezervasyon oluşturulur (stok 1 adet var, sıra 1 -> can_borrow_now = True)
+    service.create_reservation(
+        db_session, test_user, ReservationCreate(book_id=book_res.id)
+    )
+
+    # 2. Kullanıcı için onay bekleyen ödünç talebi oluşturulur
+    service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(
+            book_id=test_book.id,
+            due_date=date.today() + timedelta(days=7),
+            request_approval=True,
+        ),
+    )
+
+    # 3. Normal kullanıcı bildirimleri kontrol edilir
+    user_notifications = service.get_user_and_admin_notifications(db_session, test_user)
+    assert user_notifications.user_action_count >= 2
+    types = [item.type for item in user_notifications.items]
+    assert "RESERVATION_READY" in types
+    assert "PENDING_BORROW" in types
+    # Normal kullanıcıda admin aksiyonları olmamalıdır
+    assert user_notifications.admin_action_count == 0
+
+    # 4. Yönetici bildirimleri kontrol edilir
+    admin_notifications = service.get_user_and_admin_notifications(db_session, admin_user)
+    assert admin_notifications.admin_action_count >= 1
+    admin_types = [item.type for item in admin_notifications.items]
+    assert "ADMIN_PENDING_BORROW" in admin_types
+
+
+
 
 
 

@@ -11,6 +11,7 @@ import {
   X,
   User as UserIcon,
 } from 'lucide-react';
+import NotificationCenter from './NotificationCenter';
 
 export default function Navbar({
   activeTab,
@@ -18,6 +19,8 @@ export default function Navbar({
   user,
   onOpenAuth,
   onLogout,
+  notifications,
+  onNotificationAction,
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -97,7 +100,15 @@ export default function Navbar({
             {/* Desktop User Profile / Auth Buttons */}
             <div className="hidden md:flex items-center gap-3">
               {user ? (
-                <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
+                <div className="flex items-center gap-2.5 pl-3 border-l border-slate-200">
+                  {/* Bildirimler Sekmesi (Hesap İsminin Yanında) */}
+                  <NotificationCenter
+                    notifications={notifications}
+                    user={user}
+                    isAdmin={isAdmin}
+                    onNotificationAction={onNotificationAction}
+                  />
+
                   <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-xl">
                     <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-semibold text-sm">
                       {user.first_name?.[0]?.toUpperCase()}
@@ -153,8 +164,16 @@ export default function Navbar({
               )}
             </div>
 
-            {/* Mobile Hamburger Button */}
-            <div className="flex items-center md:hidden">
+            {/* Mobile Actions: Notifications & Hamburger Button */}
+            <div className="flex items-center gap-2 md:hidden">
+              {user && (
+                <NotificationCenter
+                  notifications={notifications}
+                  user={user}
+                  isAdmin={isAdmin}
+                  onNotificationAction={onNotificationAction}
+                />
+              )}
               <button
                 onClick={() => setMobileMenuOpen(true)}
                 aria-label="Menüyü Aç"

@@ -192,3 +192,23 @@ def test_simulate_overdue_and_pay_penalty_flow_endpoints(
     assert ok_borrow.status_code == 201
 
 
+def test_notifications_endpoint(client, auth_headers, admin_headers, test_book):
+    # Kullanıcı için bildirim endpoint'i çağrılır
+    resp_user = client.get("/api/v1/notifications", headers=auth_headers)
+    assert resp_user.status_code == 200
+    user_data = resp_user.json()
+    assert "total_count" in user_data
+    assert "user_action_count" in user_data
+    assert "admin_action_count" in user_data
+    assert user_data["admin_action_count"] == 0
+
+    # Yönetici için bildirim endpoint'i çağrılır
+    resp_admin = client.get("/api/v1/notifications", headers=admin_headers)
+    assert resp_admin.status_code == 200
+    admin_data = resp_admin.json()
+    assert "pending_penalty_approvals" in admin_data
+    assert "pending_return_approvals" in admin_data
+    assert "pending_borrow_approvals" in admin_data
+
+
+

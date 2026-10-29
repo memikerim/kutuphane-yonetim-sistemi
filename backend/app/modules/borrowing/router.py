@@ -9,6 +9,7 @@ from app.modules.borrowing.schemas import (
     BorrowingCreate,
     BorrowingRead,
     BorrowingReturn,
+    NotificationSummaryResponse,
     ReservationCreate,
     ReservationRead,
 )
@@ -98,4 +99,20 @@ def cancel_reservation(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
     """
     handle_service_error(service.cancel_reservation, db, current_user, id)
     return None
+
+
+# --- Notification & Action Center Endpoints ---
+@router.get(
+    "/notifications",
+    response_model=NotificationSummaryResponse,
+    summary="Kullanıcı ve Yönetici için aksiyon gerektiren bildirimleri listele",
+)
+def get_notifications(db: DbSession, current_user: CurrentUser):
+    """
+    Giriş yapan kullanıcı ve (varsa) yönetici için aksiyon alınması gereken durumların
+    (rezervasyon sırası geldi, ceza ödemesi gerekiyor, ödeme onayı bekliyor, iade onayı bekliyor vb.)
+    özetini ve bildirim listesini döner.
+    """
+    return service.get_user_and_admin_notifications(db, current_user)
+
 

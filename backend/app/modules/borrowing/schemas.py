@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -209,4 +210,28 @@ class ReservationRead(BaseModel):
     status: ReservationStatus
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Notifications & Action Center ---
+class NotificationItem(BaseModel):
+    id: str
+    target: str  # "USER" | "ADMIN"
+    type: str  # RESERVATION_READY, PENALTY_DUE, PAYMENT_PENDING_APPROVAL, OVERDUE_BOOK, PENDING_BORROW, PENDING_RETURN, BANNED, ADMIN_PENDING_PAYMENT, ADMIN_PENDING_RETURN, ADMIN_PENDING_BORROW, ADMIN_OVERDUE
+    severity: str  # "info" | "warning" | "error" | "success"
+    title: str
+    message: str
+    meta: dict[str, Any] = Field(default_factory=dict)
+    action_type: str | None = None
+    created_at: datetime | None = None
+
+
+class NotificationSummaryResponse(BaseModel):
+    total_count: int = 0
+    user_action_count: int = 0
+    admin_action_count: int = 0
+    pending_penalty_approvals: int = 0
+    pending_return_approvals: int = 0
+    pending_borrow_approvals: int = 0
+    items: list[NotificationItem] = Field(default_factory=list)
+
 

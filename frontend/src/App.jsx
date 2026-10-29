@@ -18,8 +18,10 @@ import {
   Calendar,
   AlertTriangle,
   ShieldAlert,
+  ShieldCheck,
   Banknote,
   Clock,
+  CreditCard,
 } from 'lucide-react';
 import { api, getToken, setToken } from './api';
 import Navbar from './components/Navbar';
@@ -35,6 +37,63 @@ export default function App() {
   const [authModalMode, setAuthModalMode] = useState(null); // null | 'login' | 'register'
   const [selectedBook, setSelectedBook] = useState(null);
   const [accountAlertOpen, setAccountAlertOpen] = useState(false);
+  const [adminAlertOpen, setAdminAlertOpen] = useState(false);
+  const [adminNavTarget, setAdminNavTarget] = useState({
+    subTab: 'books',
+    filter: 'ALL',
+  });
+
+  // Bildirimler & Aksiyon Merkezi State
+  const [notifications, setNotifications] = useState({
+    total_count: 0,
+    user_action_count: 0,
+    admin_action_count: 0,
+    pending_penalty_approvals: 0,
+    pending_return_approvals: 0,
+    pending_borrow_approvals: 0,
+    items: [],
+  });
+
+  const fetchNotifications = useCallback(async (showAdminPopup = false) => {
+    const token = getToken();
+    if (!token) {
+      setNotifications({
+        total_count: 0,
+        user_action_count: 0,
+        admin_action_count: 0,
+        pending_penalty_approvals: 0,
+        pending_return_approvals: 0,
+        pending_borrow_approvals: 0,
+        items: [],
+      });
+      return;
+    }
+    try {
+      const data = await api.getNotifications();
+      const notifData = data || {
+        total_count: 0,
+        user_action_count: 0,
+        admin_action_count: 0,
+        pending_penalty_approvals: 0,
+        pending_return_approvals: 0,
+        pending_borrow_approvals: 0,
+        items: [],
+      };
+      setNotifications(notifData);
+
+      // Yönetici kullanıcıda onay bekleyen ödeme veya iade varsa açılır pencere (modal) uyarısını tetikle
+      if (
+        showAdminPopup &&
+        (Number(notifData.pending_penalty_approvals || 0) > 0 ||
+          Number(notifData.pending_return_approvals || 0) > 0 ||
+          Number(notifData.pending_borrow_approvals || 0) > 0)
+      ) {
+        setAdminAlertOpen(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const checkAndTriggerAccountAlert = useCallback((me) => {
     if (!me) return;
@@ -56,11 +115,18 @@ export default function App() {
       setUser(me);
       if (showPopup) {
         checkAndTriggerAccountAlert(me);
+        if (me?.roles?.includes('ADMIN')) {
+          fetchNotifications(true);
+        } else {
+          fetchNotifications(false);
+        }
+      } else {
+        fetchNotifications(false);
       }
     } catch {
       // ignore
     }
-  }, [checkAndTriggerAccountAlert]);
+  }, [checkAndTriggerAccountAlert, fetchNotifications]);
 
   // Toast notifications
   const [toasts, setToasts] = useState([]);
@@ -99,22 +165,10 @@ export default function App() {
   // Mobile Filter Drawer state
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
 
-  // Check current user on mount
+  // Check current user & notifications on mount
   useEffect(() => {
-    const token = getToken();
-    if (token) {
-      api
-        .getMe()
-        .then((me) => {
-          setUser(me);
-          checkAndTriggerAccountAlert(me);
-        })
-        .catch(() => {
-          setToken(null);
-          setUser(null);
-        });
-    }
-  }, [checkAndTriggerAccountAlert]);
+    refreshCurrentUser(true);
+  }, [refreshCurrentUser]);
 
   // Load filter dropdown options (Authors, Categories, Publishers) with session caching
   const fetchFilterMetadata = useCallback(async (force = false) => {
@@ -212,6 +266,42 @@ export default function App() {
     setMobileFilterOpen(false);
   };
 
+  const handleNotificationAction = (item) => {
+    if (!item) return;
+
+    if (item.target === 'ADMIN') {
+      if (item.type === 'ADMIN_PENDING_PAYMENT') {
+        setAdminNavTarget({ subTab: 'penalties', filter: 'PENDING_APPROVAL' });
+        setActiveTab('admin');
+      } else if (item.type === 'ADMIN_PENDING_RETURN') {
+        setAdminNavTarget({ subTab: 'workflow', filter: 'RETURNS' });
+        setActiveTab('admin');
+      } else if (item.type === 'ADMIN_PENDING_BORROW') {
+        setAdminNavTarget({ subTab: 'workflow', filter: 'BORROWS' });
+        setActiveTab('admin');
+      } else {
+        setAdminNavTarget({ subTab: 'workflow', filter: 'ALL' });
+        setActiveTab('admin');
+      }
+      return;
+    }
+
+    // Kullanıcı Aksiyonları
+    if (item.type === 'RESERVATION_READY') {
+      if (item.meta?.book_id) {
+        const found = booksData.items.find((b) => b.id === item.meta.book_id);
+        if (found) {
+          setSelectedBook(found);
+          return;
+        }
+      }
+      setActiveTab('mylibrary');
+      return;
+    }
+
+    setActiveTab('mylibrary');
+  };
+
   const handleLogout = () => {
     setToken(null);
     setUser(null);
@@ -235,6 +325,8 @@ export default function App() {
         user={user}
         onOpenAuth={(mode) => setAuthModalMode(mode)}
         onLogout={handleLogout}
+        notifications={notifications}
+        onNotificationAction={handleNotificationAction}
       />
 
       {/* Üst Hesap Kısıtlama (Ban) veya Gecikme / Hasar-Kayıp Borç Bilgi Çubuğu */}
@@ -736,6 +828,7 @@ export default function App() {
             onCatalogChanged={() => {
               fetchBooks();
               refreshCurrentUser(false);
+              fetchNotifications(false);
             }}
           />
         )}
@@ -743,12 +836,15 @@ export default function App() {
         {activeTab === 'admin' && user?.roles?.includes('ADMIN') && (
           <AdminPanel
             notify={notify}
+            initialSubTab={adminNavTarget.subTab}
+            initialFilter={adminNavTarget.filter}
             onSelectBook={(b) => setSelectedBook(b)}
             onCatalogChanged={() => {
               sessionStorage.removeItem('kutuphane_metadata');
               fetchFilterMetadata(true);
               fetchBooks();
               refreshCurrentUser(false);
+              fetchNotifications(false);
             }}
           />
         )}
@@ -769,6 +865,7 @@ export default function App() {
           onSuccess={(loggedInUser) => {
             setUser(loggedInUser);
             checkAndTriggerAccountAlert(loggedInUser);
+            fetchNotifications(Boolean(loggedInUser?.roles?.includes('ADMIN')));
           }}
           notify={notify}
         />
@@ -977,6 +1074,148 @@ export default function App() {
               >
                 <Banknote className="w-4 h-4" />
                 Kitaplarım & Borç Ödeme Ekranına Git
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Yönetici Açılır Pencere (Modal): Onay Bekleyen Ödemeler & İade/Ödünç Onayı Uyarısı */}
+      {adminAlertOpen && user?.roles?.includes('ADMIN') && (
+        <div className="fixed inset-0 z-[9990] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border-2 border-amber-500 w-full max-w-xl overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white p-5 sm:p-6 flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-xs flex items-center justify-center shrink-0 mt-0.5">
+                  <ShieldCheck className="w-7 h-7 text-amber-200" />
+                </div>
+                <div>
+                  <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-white text-amber-950 mb-1.5">
+                    YETKİLİ YÖNETİCİ ONAY VE İŞ AKIŞI UYARISI
+                  </span>
+                  <h2 className="text-lg sm:text-xl font-extrabold leading-snug">
+                    Bekleyen Yönetici Onayları Bulunmaktadır!
+                  </h2>
+                  <p className="text-xs text-amber-100 mt-1">
+                    Sayın {user.first_name} {user.last_name}, onay ve aksiyonunuzu bekleyen işlemler bulunmaktadır.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAdminAlertOpen(false)}
+                className="p-1.5 rounded-xl text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-3.5 max-h-[75vh] overflow-y-auto">
+              {/* 1. Onay Bekleyen Ödemeler */}
+              {Number(notifications?.pending_penalty_approvals || 0) > 0 && (
+                <div className="p-4 rounded-2xl bg-purple-50/90 border border-purple-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-purple-950 font-bold text-sm">
+                      <CreditCard className="w-4 h-4 text-purple-700" />
+                      <span>Onay Bekleyen Ceza / Tazminat Ödemeleri</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-black bg-purple-600 text-white">
+                        {notifications.pending_penalty_approvals} Adet
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-900 leading-relaxed">
+                      Kullanıcılar ceza veya hasar/kayıp tazminatını ödedi. Yönetici onayı verilene kadar yeni ödünç ve rezervasyon hakları kısıtlıdır.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setAdminAlertOpen(false);
+                      setAdminNavTarget({ subTab: 'penalties', filter: 'PENDING_APPROVAL' });
+                      setActiveTab('admin');
+                    }}
+                    className="shrink-0 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Ödemeleri Onayla &rarr;
+                  </button>
+                </div>
+              )}
+
+              {/* 2. İade Onayı Bekleyen Kitaplar */}
+              {Number(notifications?.pending_return_approvals || 0) > 0 && (
+                <div className="p-4 rounded-2xl bg-amber-50/90 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-amber-950 font-bold text-sm">
+                      <RotateCcw className="w-4 h-4 text-amber-700" />
+                      <span>İade Onayı Bekleyen Kitaplar</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-black bg-amber-600 text-white">
+                        {notifications.pending_return_approvals} Adet
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-900 leading-relaxed">
+                      Kullanıcılar kitapları iade etti. Kitapların fiziksel durumunu kontrol edip (sağlam/hasarlı/kayıp) teslim almanız bekleniyor.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setAdminAlertOpen(false);
+                      setAdminNavTarget({ subTab: 'workflow', filter: 'RETURNS' });
+                      setActiveTab('admin');
+                    }}
+                    className="shrink-0 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                  >
+                    İade Kuyruğuna Git &rarr;
+                  </button>
+                </div>
+              )}
+
+              {/* 3. Ödünç Alma Talepleri */}
+              {Number(notifications?.pending_borrow_approvals || 0) > 0 && (
+                <div className="p-4 rounded-2xl bg-blue-50/90 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-blue-950 font-bold text-sm">
+                      <BookOpen className="w-4 h-4 text-blue-700" />
+                      <span>Ödünç Alma Talepleri</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-black bg-blue-600 text-white">
+                        {notifications.pending_borrow_approvals} Adet
+                      </span>
+                    </div>
+                    <p className="text-xs text-blue-900 leading-relaxed">
+                      Kullanıcılar ödünç talebinde bulundu. Kitabın rafdan teslim edilip teslimat onayının verilmesi bekleniyor.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setAdminAlertOpen(false);
+                      setAdminNavTarget({ subTab: 'workflow', filter: 'BORROWS' });
+                      setActiveTab('admin');
+                    }}
+                    className="shrink-0 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Ödünç Kuyruğuna Git &rarr;
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setAdminAlertOpen(false)}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition-colors cursor-pointer"
+              >
+                Anladım, Kapat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminAlertOpen(false);
+                  setActiveTab('admin');
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                Admin Paneline Git
               </button>
             </div>
           </div>
