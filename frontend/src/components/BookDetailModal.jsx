@@ -125,6 +125,22 @@ export default function BookDetailModal({
       onOpenAuth('login');
       return;
     }
+    if (user.is_banned) {
+      notify(
+        `Hesabınız yönetici tarafından kısıtlanmıştır: ${
+          user.ban_reason || 'Yeni kitap ödünç alamazsınız.'
+        }`,
+        'error'
+      );
+      return;
+    }
+    if ((user.overdue_books_count || 0) > 0 || (user.unpaid_penalty_total || 0) > 0) {
+      notify(
+        'Gecikmiş kitabınızı iade edene ve gecikme veya kayıp/hasar tazminat borçlarınızı ödeyene kadar yeni kitap ödünç alamazsınız.',
+        'error'
+      );
+      return;
+    }
     setRulesAccepted(true);
     setConfirmMode('borrow');
   };
@@ -134,6 +150,22 @@ export default function BookDetailModal({
       notify('Rezervasyon yapmak için lütfen giriş yapın.', 'info');
       onClose();
       onOpenAuth('login');
+      return;
+    }
+    if (user.is_banned) {
+      notify(
+        `Hesabınız yönetici tarafından kısıtlanmıştır: ${
+          user.ban_reason || 'Yeni rezervasyon yapamazsınız.'
+        }`,
+        'error'
+      );
+      return;
+    }
+    if ((user.overdue_books_count || 0) > 0 || (user.unpaid_penalty_total || 0) > 0) {
+      notify(
+        'Gecikmiş kitabınızı iade edene ve gecikme veya kayıp/hasar tazminat borçlarınızı ödeyene kadar yeni rezervasyon yapamazsınız.',
+        'error'
+      );
       return;
     }
     setRulesAccepted(true);
@@ -463,7 +495,39 @@ export default function BookDetailModal({
               </div>
 
               {/* Borrowing & Reservation Action Box */}
-              <div className="pt-3 border-t border-slate-200/80">
+              <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                {user?.is_banned ? (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-start gap-2">
+                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Hesabınız Kısıtlanmıştır (Banlı):</p>
+                      <p className="mt-0.5 text-rose-800">
+                        {user.ban_reason ||
+                          'Kitap iadeniz ve borç ödemeleriniz tamamlanana kadar yeni ödünç alma, rezervasyon ve yorum işlemleri kapalıdır.'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (user?.overdue_books_count || 0) > 0 || (user?.unpaid_penalty_total || 0) > 0 ? (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Yeni Ödünç / Rezervasyon Kısıtlaması:</p>
+                      <p className="mt-0.5 text-amber-800">
+                        Hesabınızda{' '}
+                        {user.overdue_books_count > 0 && (
+                          <strong>{user.overdue_books_count} adet gecikmiş kitap </strong>
+                        )}
+                        {user.unpaid_penalty_total > 0 && (
+                          <strong>
+                            {Number(user.unpaid_penalty_total).toFixed(2)} TL ödenmemiş gecikme / kayıp-hasar borcu{' '}
+                          </strong>
+                        )}
+                        bulunmaktadır. Gecikmiş kitabınızı iade edene ve borcunuzu ödeyene kadar yeni kitap ödünç alamazsınız.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
                 {userHasActiveSlot ? (
                   <div className="space-y-3">
                     <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-xs text-emerald-900">
@@ -849,7 +913,18 @@ export default function BookDetailModal({
                     </div>
                   </div>
 
-                  {user && !hasBorrowedBook && (
+                  {user?.is_banned && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs">
+                      <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Yorum Yapma Kısıtlaması:</strong>{' '}
+                        {user.ban_reason ||
+                          'Hesabınız yönetici tarafından kısıtlandığı için yeni değerlendirme ve yorum bırakamazsınız.'}
+                      </span>
+                    </div>
+                  )}
+
+                  {user && !user.is_banned && !hasBorrowedBook && (
                     <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                       <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                       <span>

@@ -35,6 +35,8 @@ class BorrowingRead(BaseModel):
     overdue_days: int = 0
     user_email: str | None = None
     user_full_name: str | None = None
+    user_is_banned: bool = False
+    user_ban_reason: str | None = None
     book_title: str | None = None
     book_isbn: str | None = None
 
@@ -141,8 +143,11 @@ class StockMovementSummaryResponse(BaseModel):
     total_movements: int
     damaged_reports_count: int
     lost_reports_count: int
+    damaged_count: int = 0
+    lost_count: int = 0
     restock_count: int
     total_compensation_amount: float
+    total_damage_lost_penalty: float = 0.0
     items: list[StockMovementRead]
 
 

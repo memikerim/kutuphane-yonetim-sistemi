@@ -8,6 +8,8 @@ from app.core.database import DbSession
 from app.core.logging_config import get_system_logs
 from app.modules.admin import service as admin_service
 from app.modules.admin.schemas import (
+    AdminUserItem,
+    BanUserRequest,
     DashboardResponse,
     DashboardStats,
     SystemLogEntry,
@@ -220,6 +222,51 @@ def create_stock_movement(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except borrowing_service.BusinessRuleError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.get(
+    "/users",
+    response_model=list[AdminUserItem],
+    summary="Tüm kullanıcıları, borç ve ban durumlarıyla listele (yalnızca ADMIN)",
+)
+def list_users(admin: AdminUser, db: DbSession):
+    return admin_service.list_users_for_admin(db)
+
+
+@router.post(
+    "/users/{user_id}/ban",
+    response_model=AdminUserItem,
+    summary="Kullanıcıyı banla ve ban sebebi/notu ekle (yalnızca ADMIN)",
+)
+def ban_user_endpoint(
+    user_id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+    data: BanUserRequest | None = Body(default=None),
+):
+    req = data or BanUserRequest()
+    try:
+        return admin_service.ban_user(db, admin, user_id, req.ban_reason)
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except borrowing_service.BusinessRuleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.post(
+    "/users/{user_id}/unban",
+    response_model=AdminUserItem,
+    summary="Kullanıcının banını (hesap kısıtlamasını) kaldır (yalnızca ADMIN)",
+)
+def unban_user_endpoint(
+    user_id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+):
+    try:
+        return admin_service.unban_user(db, admin, user_id)
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
 

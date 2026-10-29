@@ -48,5 +48,5 @@ def login(data: UserLogin, db: DbSession):
     summary="Giriş yapmış kullanıcının bilgileri (token gerekli)",
     responses={401: {"description": "Token yok / geçersiz"}},
 )
-def me(current_user: CurrentUser):
-    return current_user
+def me(current_user: CurrentUser, db: DbSession):
+    return service.build_user_read_with_alerts(db, current_user)

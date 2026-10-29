@@ -1,6 +1,7 @@
 """Auth iş mantığı. HTTP'den bağımsızdır; hatalar domain exception olarak fırlatılır."""
 
 import logging
+from datetime import date
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,7 +14,7 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.auth.models import Role, RoleName, User
-from app.modules.auth.schemas import TokenResponse, UserRegister
+from app.modules.auth.schemas import TokenResponse, UserAlertItem, UserRead, UserRegister
 
 logger = logging.getLogger(__name__)
 
@@ -84,3 +85,95 @@ def issue_access_token(user: User) -> TokenResponse:
     return TokenResponse(
         access_token=token, expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
+
+
+def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
+    """Kullanıcının ban durumunu, gecikmiş kitaplarını ve ödenmemiş gecikme/hasar/kayıp borçlarını hesaplar."""
+    from app.modules.borrowing.models import Borrowing, BorrowingStatus
+    from app.modules.borrowing.service import sync_overdue_borrowings
+
+    sync_overdue_borrowings(db, user.id)
+    today = date.today()
+
+    borrowings = list(
+        db.scalars(
+            select(Borrowing)
+            .where(Borrowing.user_id == user.id)
+            .order_by(Borrowing.due_date.asc())
+        ).all()
+    )
+
+    overdue_books_count = 0
+    unpaid_overdue_total = 0.0
+    unpaid_damage_loss_total = 0.0
+    unpaid_penalty_total = 0.0
+    alert_items: list[UserAlertItem] = []
+
+    for b in borrowings:
+        cond = (b.return_condition or "GOOD").upper()
+        approval_st = b.approval_status or "APPROVED"
+        if b.status != BorrowingStatus.RETURNED and approval_st == "PENDING_BORROW":
+            continue
+
+        due_d = b.due_date.date() if hasattr(b.due_date, "date") else b.due_date
+        is_overdue_active = (
+            b.status != BorrowingStatus.RETURNED
+            and (b.status == BorrowingStatus.OVERDUE or (due_d is not None and today > due_d))
+        )
+        is_damaged_or_lost_pending = (
+            b.status != BorrowingStatus.RETURNED and cond in ("DAMAGED", "LOST")
+        )
+        has_unpaid_penalty = (
+            ((b.penalty_amount or 0.0) > 0 or (b.damage_penalty or 0.0) > 0)
+            and not b.is_penalty_paid
+        )
+
+        if not (is_overdue_active or is_damaged_or_lost_pending or has_unpaid_penalty):
+            continue
+
+        if b.status != BorrowingStatus.RETURNED and is_overdue_active:
+            overdue_books_count += 1
+
+        overdue_days = int(b.overdue_days or 0)
+        if is_overdue_active and overdue_days <= 0 and due_d is not None:
+            overdue_days = max(1, (today - due_d).days)
+
+        dmg_pen = float(b.damage_penalty or 0.0)
+        if dmg_pen <= 0.0 and cond == "DAMAGED":
+            dmg_pen = float(settings.DAMAGED_BOOK_PENALTY)
+        elif dmg_pen <= 0.0 and cond == "LOST":
+            dmg_pen = float(settings.LOST_BOOK_PENALTY)
+
+        overdue_pen = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+        total_pen = float(b.penalty_amount or 0.0)
+        if total_pen < round(overdue_pen + dmg_pen, 2):
+            total_pen = round(overdue_pen + dmg_pen, 2)
+
+        if not b.is_penalty_paid:
+            unpaid_overdue_total += overdue_pen
+            unpaid_damage_loss_total += dmg_pen
+            unpaid_penalty_total += total_pen
+
+        alert_items.append(
+            UserAlertItem(
+                borrowing_id=b.id,
+                book_id=b.book_id,
+                book_title=b.book.title if b.book else "Kitap",
+                due_date=due_d,
+                status=b.status.value if hasattr(b.status, "value") else str(b.status),
+                approval_status=approval_st,
+                return_condition=cond,
+                overdue_days=overdue_days,
+                overdue_penalty=round(overdue_pen, 2),
+                damage_penalty=round(dmg_pen, 2),
+                penalty_amount=round(total_pen, 2),
+            )
+        )
+
+    base = UserRead.model_validate(user)
+    base.overdue_books_count = overdue_books_count
+    base.unpaid_overdue_total = round(unpaid_overdue_total, 2)
+    base.unpaid_damage_loss_total = round(unpaid_damage_loss_total, 2)
+    base.unpaid_penalty_total = round(unpaid_penalty_total, 2)
+    base.alert_items = alert_items
+    return base

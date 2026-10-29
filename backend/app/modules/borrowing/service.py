@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 MAX_ACTIVE_BORROWINGS = 3
 RESERVATION_HOLD_HOURS = 24
 OVERDUE_OR_PENALTY_BLOCK_MSG = (
-    "Ödenmemiş gecikme cezanız veya süresi geçmiş kitabınız bulunduğu için yeni işlem yapamazsınız."
+    "Ödenmemiş gecikme cezanız veya süresi geçmiş kitabınız ya da ödenmemiş hasar/kayıp tazminat borcunuz bulunduğu için yeni işlem yapamazsınız."
 )
 
 
@@ -68,9 +68,22 @@ def sync_overdue_borrowings(db: Session, user_id: uuid.UUID | None = None) -> No
 
 def _check_user_overdue_or_unpaid_penalty(db: Session, user: User) -> None:
     """
-    Kullanıcının süresi geçmiş aktif bir ödünç kitabı (OVERDUE) veya
-    ödenmemiş gecikme cezası (penalty_amount > 0 ve is_penalty_paid == False) varsa 400 fırlatır.
+    Kullanıcı banlıysa (is_banned == True), süresi geçmiş aktif bir ödünç kitabı (OVERDUE) varsa,
+    hasarlı/kayıp olarak işaretlenmiş kitabı varsa veya ödenmemiş gecikme / hasar / kayıp
+    tazminat borcu (penalty_amount > 0 ve is_penalty_paid == False) varsa 400 fırlatır.
     """
+    if getattr(user, "is_banned", False):
+        reason = getattr(user, "ban_reason", None) or (
+            "Kitap iadeniz ve borç ödemeniz tamamlanana kadar hesabınız yeni kitap ödünç almaya, "
+            "rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır."
+        )
+        logger.warning(
+            "İşlem engellendi (Kullanıcı banlı) -> user_id: %s, reason: %s",
+            user.id,
+            reason,
+        )
+        raise BusinessRuleError(f"Hesabınız yönetici tarafından kısıtlanmıştır: {reason}")
+
     sync_overdue_borrowings(db, user.id)
     today = date.today()
 
@@ -78,19 +91,27 @@ def _check_user_overdue_or_unpaid_penalty(db: Session, user: User) -> None:
         db.scalars(select(Borrowing).where(Borrowing.user_id == user.id)).all()
     )
     for b in user_borrowings:
+        cond = (b.return_condition or "GOOD").upper()
         is_overdue_active = (
             b.status != BorrowingStatus.RETURNED
             and b.approval_status != "PENDING_BORROW"
             and (b.status == BorrowingStatus.OVERDUE or b.due_date < today)
         )
-        has_unpaid_penalty = (b.penalty_amount or 0.0) > 0 and not b.is_penalty_paid
+        is_damaged_or_lost_pending = (
+            b.status != BorrowingStatus.RETURNED and cond in ("DAMAGED", "LOST")
+        )
+        has_unpaid_penalty = (
+            ((b.penalty_amount or 0.0) > 0 or (b.damage_penalty or 0.0) > 0)
+            and not b.is_penalty_paid
+        )
 
-        if is_overdue_active or has_unpaid_penalty:
+        if is_overdue_active or is_damaged_or_lost_pending or has_unpaid_penalty:
             logger.warning(
-                "İşlem engellendi (Gecikmiş kitap veya ödenmemiş ceza mevcut) -> user_id: %s, borrow_id: %s, status: %s, penalty: %.2f, paid: %s",
+                "İşlem engellendi (Gecikmiş kitap, hasar/kayıp bildirimi veya ödenmemiş borç mevcut) -> user_id: %s, borrow_id: %s, status: %s, cond: %s, penalty: %.2f, paid: %s",
                 user.id,
                 b.id,
                 b.status,
+                cond,
                 b.penalty_amount or 0.0,
                 b.is_penalty_paid,
             )
@@ -464,7 +485,7 @@ def _complete_return_transaction(
         )
 
     book = db.get(Book, borrowing.book_id)
-    stock_before = int(book.stock_count or 0) if book else 0
+    current_shelf_stock = int(book.stock_count or 0) if book else 0
 
     if cond == "LOST":
         restore_to_stock = False
@@ -473,12 +494,18 @@ def _complete_return_transaction(
     else:
         restore_to_stock = True
 
-    qty_change = 0
     if book and restore_to_stock:
         book.stock_count = Book.stock_count + 1
         qty_change = 1
+        stock_before = current_shelf_stock
+        stock_after = current_shelf_stock + 1
+    else:
+        # Kitap ödünç alındığında raftan -1 ayrılmıştı (ödünç öncesi toplam envanter = current_shelf_stock + 1).
+        # Kitap KAYIP (LOST) veya AĞIR HASARLI (DAMAGED) olduğu için rafa geri eklenmez ve toplam stoktan -1 kalıcı olarak düşülür.
+        qty_change = -1
+        stock_before = current_shelf_stock + 1
+        stock_after = current_shelf_stock
 
-    stock_after = stock_before + qty_change
     movement_type = (
         "RETURN_GOOD"
         if cond == "GOOD"
@@ -491,7 +518,7 @@ def _complete_return_transaction(
         if cond == "GOOD"
         else f"Hasarlı kitap iadesi ({dmg_penalty:.0f} TL hasar tazminatı yansıtıldı)"
         if cond == "DAMAGED"
-        else f"Kayıp kitap bildirimi ({dmg_penalty:.0f} TL kayıp bedeli yansıtıldı, stoktan düşüldü)"
+        else f"Kayıp kitap bildirimi ({dmg_penalty:.0f} TL kayıp bedeli yansıtıldı, 1 adet kalıcı stoktan düşüldü)"
     )
     combined_note = notes or borrowing.admin_notes or borrowing.return_notes or default_note
 
@@ -590,13 +617,32 @@ def return_borrowing(
         borrowing.return_condition = cond
         if notes:
             borrowing.return_notes = notes
+
+        # Kullanıcı kitabı HASARLI (DAMAGED) veya KAYIP (LOST) olarak işaretlediyse veya gecikme varsa
+        # tahmini tazminat/gecikme borcunu hemen yansıt ki borç ödenene kadar yeni kitap ödünç alamasın.
+        today = date.today()
+        overdue_days = max(0, (today - borrowing.due_date).days) if today > borrowing.due_date else 0
+        overdue_pen = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+        dmg_pen = (
+            float(settings.DAMAGED_BOOK_PENALTY)
+            if cond == "DAMAGED"
+            else float(settings.LOST_BOOK_PENALTY)
+            if cond == "LOST"
+            else 0.0
+        )
+        if dmg_pen > 0 or overdue_pen > 0:
+            borrowing.damage_penalty = dmg_pen
+            borrowing.penalty_amount = round(overdue_pen + dmg_pen, 2)
+            borrowing.is_penalty_paid = False
+
         db.commit()
         db.refresh(borrowing)
         logger.info(
-            "İade ve fiziksel kontrol talebi oluşturuldu (Görevli onayı bekleniyor) -> borrow_id: %s, user_id: %s, condition: %s",
+            "İade ve fiziksel kontrol talebi oluşturuldu (Görevli onayı bekleniyor) -> borrow_id: %s, user_id: %s, condition: %s, penalty: %.2f",
             borrowing.id,
             user.id,
             cond,
+            borrowing.penalty_amount or 0.0,
         )
         return borrowing
 
@@ -1070,6 +1116,16 @@ def create_manual_stock_movement(
     return movement
 
 
+def _normalize_stock_movement_read(m: StockMovement) -> StockMovementRead:
+    item = StockMovementRead.model_validate(m)
+    # Eski kayıtlarda RETURN_LOST / RETURN_DAMAGED (rafa dönmeyen) işlemlerde quantity_change=0 kaydedildiyse
+    # ödünç alınan nüshanın toplam envanterden -1 kalıcı düşüldüğünü net olarak göster:
+    if item.movement_type in ("RETURN_LOST", "RETURN_DAMAGED") and item.quantity_change == 0:
+        item.quantity_change = -1
+        item.stock_before = item.stock_after + 1
+    return item
+
+
 def get_stock_movements_summary(
     db: Session,
     condition: str | None = None,
@@ -1096,13 +1152,16 @@ def get_stock_movements_summary(
     if book_id is not None:
         filtered = [m for m in filtered if m.book_id == book_id]
 
-    items = [StockMovementRead.model_validate(m) for m in filtered[:limit]]
+    items = [_normalize_stock_movement_read(m) for m in filtered[:limit]]
     return StockMovementSummaryResponse(
         total_movements=len(all_movements),
         damaged_reports_count=damaged_count,
         lost_reports_count=lost_count,
+        damaged_count=damaged_count,
+        lost_count=lost_count,
         restock_count=restock_count,
         total_compensation_amount=total_comp,
+        total_damage_lost_penalty=total_comp,
         items=items,
     )
 
@@ -1191,7 +1250,7 @@ def get_book_history(db: Session, book_id: uuid.UUID) -> BookHistoryResponse:
             total_damage_loss_penalty=total_dmg_penalty,
         ),
         reading_history=reading_records,
-        stock_movements=[StockMovementRead.model_validate(m) for m in movements],
+        stock_movements=[_normalize_stock_movement_read(m) for m in movements],
     )
 
 

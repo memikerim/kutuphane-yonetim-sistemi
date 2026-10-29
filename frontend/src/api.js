@@ -181,6 +181,16 @@ export const api = {
   simulateOverdue: (id) =>
     request(`/admin/borrowings/${id}/simulate-overdue`, { method: 'PATCH' }),
   getUnpaidPenalties: () => request('/admin/unpaid-penalties'),
+  getAdminUsers: () => request('/admin/users'),
+  banUser: (userId, data = {}) =>
+    request(`/admin/users/${userId}/ban`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  unbanUser: (userId) =>
+    request(`/admin/users/${userId}/unban`, {
+      method: 'POST',
+    }),
   getSystemLogs: (params = {}) => {
     const searchParams = new URLSearchParams();
     if (params.category) searchParams.set('category', params.category);

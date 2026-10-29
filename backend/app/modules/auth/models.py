@@ -1,7 +1,8 @@
 import enum
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, Enum, ForeignKey, Integer, String, Table
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.base_model import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
@@ -32,6 +33,9 @@ class User(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ban_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    banned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     roles: Mapped[list["Role"]] = relationship(
         secondary=user_roles, back_populates="users", lazy="selectin"

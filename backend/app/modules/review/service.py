@@ -362,6 +362,18 @@ def create_review(db: Session, user: User, data: ReviewCreate) -> Review:
         )
         raise NotFoundError("Değerlendirme yapılmak istenen kitap bulunamadı")
 
+    if getattr(user, "is_banned", False):
+        reason = getattr(user, "ban_reason", None) or (
+            "Kitap iadeniz ve borç ödemeniz tamamlanana kadar hesabınız yeni kitap ödünç almaya, "
+            "rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır."
+        )
+        logger.warning(
+            "Yorum ekleme reddedildi (Kullanıcı banlı) -> user_id: %s, reason: %s",
+            user.id,
+            reason,
+        )
+        raise BusinessRuleError(f"Hesabınız yönetici tarafından kısıtlanmıştır: {reason}")
+
     # Kural 1: Kötü söz / uygunsuz ifade filtresi
     bad_word = find_inappropriate_expression(data.comment)
     if bad_word is not None:
@@ -481,6 +493,12 @@ def react_to_review(db: Session, user: User, review_id: uuid.UUID, value: int) -
     """
     if value not in (1, -1):
         raise BusinessRuleError("Geçersiz tepki değeri (1 veya -1 olmalıdır).")
+
+    if getattr(user, "is_banned", False):
+        reason = getattr(user, "ban_reason", None) or (
+            "Hesabınız yönetici tarafından kısıtlanmıştır."
+        )
+        raise BusinessRuleError(f"Hesabınız kısıtlı olduğu için bu işlemi yapamazsınız: {reason}")
 
     review = db.get(Review, review_id)
     if not review:

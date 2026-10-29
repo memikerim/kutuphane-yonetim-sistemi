@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
@@ -66,6 +66,20 @@ class TokenResponse(BaseModel):
     expires_in: int = Field(description="Token geçerlilik süresi (saniye)")
 
 
+class UserAlertItem(BaseModel):
+    borrowing_id: uuid.UUID
+    book_id: uuid.UUID
+    book_title: str
+    due_date: date
+    status: str
+    approval_status: str = "APPROVED"
+    return_condition: str = "GOOD"
+    overdue_days: int = 0
+    overdue_penalty: float = 0.0
+    damage_penalty: float = 0.0
+    penalty_amount: float = 0.0
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -75,6 +89,14 @@ class UserRead(BaseModel):
     last_name: str
     created_at: datetime
     roles: list[RoleName]
+    is_banned: bool = False
+    ban_reason: str | None = None
+    banned_at: datetime | None = None
+    overdue_books_count: int = 0
+    unpaid_overdue_total: float = 0.0
+    unpaid_damage_loss_total: float = 0.0
+    unpaid_penalty_total: float = 0.0
+    alert_items: list[UserAlertItem] = Field(default_factory=list)
 
     @field_validator("roles", mode="before")
     @classmethod

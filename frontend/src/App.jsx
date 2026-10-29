@@ -16,6 +16,9 @@ import {
   RotateCcw,
   Sparkles,
   Calendar,
+  AlertTriangle,
+  ShieldAlert,
+  Banknote,
 } from 'lucide-react';
 import { api, getToken, setToken } from './api';
 import Navbar from './components/Navbar';
@@ -30,6 +33,32 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authModalMode, setAuthModalMode] = useState(null); // null | 'login' | 'register'
   const [selectedBook, setSelectedBook] = useState(null);
+  const [accountAlertOpen, setAccountAlertOpen] = useState(false);
+
+  const checkAndTriggerAccountAlert = useCallback((me) => {
+    if (!me) return;
+    const hasBan = Boolean(me.is_banned);
+    const hasOverdue = Number(me.overdue_books_count || 0) > 0;
+    const hasUnpaidFee = Number(me.unpaid_penalty_total || 0) > 0;
+    const hasAlertItems = Array.isArray(me.alert_items) && me.alert_items.length > 0;
+    if (hasBan || hasOverdue || hasUnpaidFee || hasAlertItems) {
+      setAccountAlertOpen(true);
+    }
+  }, []);
+
+  const refreshCurrentUser = useCallback(async (showPopup = false) => {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const me = await api.getMe();
+      setUser(me);
+      if (showPopup) {
+        checkAndTriggerAccountAlert(me);
+      }
+    } catch {
+      // ignore
+    }
+  }, [checkAndTriggerAccountAlert]);
 
   // Toast notifications
   const [toasts, setToasts] = useState([]);
@@ -74,13 +103,16 @@ export default function App() {
     if (token) {
       api
         .getMe()
-        .then((me) => setUser(me))
+        .then((me) => {
+          setUser(me);
+          checkAndTriggerAccountAlert(me);
+        })
         .catch(() => {
           setToken(null);
           setUser(null);
         });
     }
-  }, []);
+  }, [checkAndTriggerAccountAlert]);
 
   // Load filter dropdown options (Authors, Categories, Publishers) with session caching
   const fetchFilterMetadata = useCallback(async (force = false) => {
@@ -202,6 +234,54 @@ export default function App() {
         onOpenAuth={(mode) => setAuthModalMode(mode)}
         onLogout={handleLogout}
       />
+
+      {/* Üst Hesap Kısıtlama (Ban) veya Gecikme / Hasar-Kayıp Borç Bilgi Çubuğu */}
+      {user &&
+        (user.is_banned ||
+          Number(user.overdue_books_count || 0) > 0 ||
+          Number(user.unpaid_penalty_total || 0) > 0) && (
+          <div className="bg-gradient-to-r from-rose-700 via-red-700 to-rose-800 text-white border-b border-rose-500">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 font-semibold">
+                <ShieldAlert className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>
+                  {user.is_banned
+                    ? `Hesabınız Yönetici Tarafından Kısıtlanmıştır (Banlı): ${
+                        user.ban_reason ||
+                        'Kitap iadeniz ve borç ödemeniz yapılana kadar yeni ödünç, rezervasyon ve yorum işlemleriniz kapalıdır.'
+                      }`
+                    : `Hesabınızda ${
+                        user.overdue_books_count > 0
+                          ? `${user.overdue_books_count} adet gecikmiş kitap`
+                          : ''
+                      }${
+                        user.overdue_books_count > 0 && user.unpaid_penalty_total > 0
+                          ? ' ve '
+                          : ''
+                      }${
+                        user.unpaid_penalty_total > 0
+                          ? `${Number(user.unpaid_penalty_total).toFixed(2)} TL ödenmemiş gecikme/hasar/kayıp ücreti`
+                          : ''
+                      } bulunmaktadır.`}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setAccountAlertOpen(true)}
+                  className="px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white font-bold transition-colors cursor-pointer"
+                >
+                  Detayları Gör
+                </button>
+                <button
+                  onClick={() => setActiveTab('mylibrary')}
+                  className="px-3 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold transition-colors cursor-pointer"
+                >
+                  Kitaplarım & Borç Öde
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
@@ -648,7 +728,10 @@ export default function App() {
           <MyLibraryView
             notify={notify}
             onSelectBook={(b) => setSelectedBook(b)}
-            onCatalogChanged={() => fetchBooks()}
+            onCatalogChanged={() => {
+              fetchBooks();
+              refreshCurrentUser(false);
+            }}
           />
         )}
 
@@ -660,6 +743,7 @@ export default function App() {
               sessionStorage.removeItem('kutuphane_metadata');
               fetchFilterMetadata(true);
               fetchBooks();
+              refreshCurrentUser(false);
             }}
           />
         )}
@@ -677,7 +761,10 @@ export default function App() {
         <AuthModal
           initialMode={authModalMode}
           onClose={() => setAuthModalMode(null)}
-          onSuccess={(loggedInUser) => setUser(loggedInUser)}
+          onSuccess={(loggedInUser) => {
+            setUser(loggedInUser);
+            checkAndTriggerAccountAlert(loggedInUser);
+          }}
           notify={notify}
         />
       )}
@@ -690,6 +777,7 @@ export default function App() {
           onClose={() => {
             setSelectedBook(null);
             fetchBooks();
+            refreshCurrentUser(false);
           }}
           onOpenAuth={(mode) => setAuthModalMode(mode)}
           onBookUpdated={(freshBook) => {
@@ -697,9 +785,177 @@ export default function App() {
               setSelectedBook(freshBook);
             }
             fetchBooks();
+            refreshCurrentUser(false);
           }}
           notify={notify}
         />
+      )}
+
+      {/* Giriş Sonrası Açılır Pencere (Modal): Ban / Hesap Kısıtlama & Gecikme / Kayıp-Hasar Tahsilat Uyarısı */}
+      {accountAlertOpen && user && (
+        <div className="fixed inset-0 z-[9990] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border-2 border-rose-500 w-full max-w-xl overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-rose-700 via-red-700 to-rose-800 text-white p-5 sm:p-6 flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-xs flex items-center justify-center shrink-0 mt-0.5">
+                  <ShieldAlert className="w-7 h-7 text-amber-300" />
+                </div>
+                <div>
+                  <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-400 text-slate-950 mb-1.5">
+                    ÖNEMLİ HESAP VE İŞLEM UYARISI
+                  </span>
+                  <h2 className="text-lg sm:text-xl font-extrabold leading-snug">
+                    {user.is_banned
+                      ? 'Hesabınız Yönetici Tarafından Kısıtlanmıştır!'
+                      : 'Gecikmiş Kitap veya Ödenmemiş Borç Bildirimi'}
+                  </h2>
+                  <p className="text-xs text-rose-100 mt-1">
+                    Sayın {user.first_name} {user.last_name}, hesabınızla ilgili aşağıdaki durumu lütfen inceleyin.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAccountAlertOpen(false)}
+                className="p-1.5 rounded-xl text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* 1. Yönetici Ban / Kısıtlama Kutusu */}
+              {user.is_banned && (
+                <div className="p-4 rounded-2xl bg-rose-50 border-2 border-rose-300 space-y-2">
+                  <div className="flex items-center gap-2 text-rose-900 font-extrabold text-sm">
+                    <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                    <span>Yönetici Kısıtlama (Ban) Kararı ve Sebebi:</span>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-white border border-rose-200 text-xs sm:text-sm font-bold text-slate-900 leading-relaxed">
+                    "{user.ban_reason ||
+                      'Kitap iadeniz ve gecikme/hasar ödemeniz yapılana kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır.'}"
+                  </div>
+                  <p className="text-xs text-rose-800 leading-relaxed">
+                    Bu kısıtlama aktif olduğu sürece <strong>yeni kitap ödünç alamaz</strong>,{' '}
+                    <strong>rezervasyon sırasına giremez</strong> ve{' '}
+                    <strong>kitaplara değerlendirme/yorum bırakamazsınız</strong>. Mevcut kitaplarınızı iade edebilir ve açık borçlarınızı ödeyebilirsiniz.
+                  </p>
+                </div>
+              )}
+
+              {/* 2. Gecikmiş Kitap & Gecikme / Kayıp / Hasar Tahsilat Ücreti Kutusu */}
+              {(Number(user.overdue_books_count || 0) > 0 ||
+                Number(user.unpaid_penalty_total || 0) > 0 ||
+                (user.alert_items && user.alert_items.length > 0)) && (
+                <div className="p-4 rounded-2xl bg-amber-50/90 border border-amber-300 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-amber-950 font-extrabold text-sm">
+                      <Banknote className="w-5 h-5 text-amber-700 shrink-0" />
+                      <span>Gecikmiş Kitap & Tahsilat Ücreti Özeti</span>
+                    </div>
+                    <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-rose-600 text-white">
+                      Toplam Borç: {Number(user.unpaid_penalty_total || 0).toFixed(2)} TL
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <div className="bg-white p-3 rounded-xl border border-amber-200">
+                      <span className="text-slate-500 block text-[11px]">Gecikmiş Kitap</span>
+                      <span className="text-base font-extrabold text-rose-700">
+                        {user.overdue_books_count || 0} Adet
+                      </span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-amber-200">
+                      <span className="text-slate-500 block text-[11px]">Gecikme Ücreti</span>
+                      <span className="text-base font-extrabold text-amber-900">
+                        {Number(user.unpaid_overdue_total || 0).toFixed(2)} TL
+                      </span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-amber-200">
+                      <span className="text-slate-500 block text-[11px]">Kayıp / Hasar Ücreti</span>
+                      <span className="text-base font-extrabold text-rose-800">
+                        {Number(user.unpaid_damage_loss_total || 0).toFixed(2)} TL
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* İlgili Kitapların Listesi */}
+                  {user.alert_items && user.alert_items.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-amber-900 block">
+                        İşlem / Ödeme Bekleyen Kayıtlarınız ({user.alert_items.length})
+                      </span>
+                      <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                        {user.alert_items.map((item) => (
+                          <div
+                            key={item.borrowing_id}
+                            className="bg-white p-3 rounded-xl border border-amber-200 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div>
+                              <span className="font-bold text-slate-900 block">
+                                {item.book_title}
+                              </span>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[11px] text-slate-500">
+                                <span>Son Teslim: {item.due_date}</span>
+                                {item.overdue_days > 0 && (
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 font-bold">
+                                    {item.overdue_days} Gün Gecikme
+                                  </span>
+                                )}
+                                {item.return_condition === 'LOST' && (
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold">
+                                    Kayıp Kitap Tazminatı
+                                  </span>
+                                )}
+                                {item.return_condition === 'DAMAGED' && (
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-950 font-bold">
+                                    Hasarlı Kitap Tazminatı
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="font-extrabold text-rose-700 shrink-0">
+                              {Number(item.penalty_amount || 0).toFixed(2)} TL
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-amber-950 leading-relaxed">
+                    Kütüphane kuralları gereği; geciktirdiğiniz kitabı iade edene ve oluşan{' '}
+                    <strong>gecikme ücretini</strong> veya{' '}
+                    <strong>hasar / kayıp tahsilat ücretini</strong> ödeyene kadar yeni kitap ödünç alamaz ve rezervasyon yapamazsınız.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setAccountAlertOpen(false)}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition-colors cursor-pointer"
+              >
+                Anladım, Kapat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountAlertOpen(false);
+                  setActiveTab('mylibrary');
+                }}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-colors cursor-pointer"
+              >
+                <Banknote className="w-4 h-4" />
+                Kitaplarım & Borç Ödeme Ekranına Git
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Yüksek Öncelikli ve Net Görünürlüklü Toast Bildirimleri (Tüm pencerelerin ve modalların en üstünde) */}

@@ -113,6 +113,14 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     def book_isbn(self) -> str | None:
         return self.book.isbn if self.book else None
 
+    @property
+    def user_is_banned(self) -> bool:
+        return bool(getattr(self.user, "is_banned", False)) if self.user else False
+
+    @property
+    def user_ban_reason(self) -> str | None:
+        return getattr(self.user, "ban_reason", None) if self.user else None
+
 
 
 class Reservation(UUIDPrimaryKeyMixin, Base):
@@ -308,6 +316,14 @@ class StockMovement(UUIDPrimaryKeyMixin, Base):
     @property
     def book_isbn(self) -> str | None:
         return self.book.isbn if self.book else None
+
+    @property
+    def user_is_banned(self) -> bool:
+        return bool(getattr(self.user, "is_banned", False)) if self.user else False
+
+    @property
+    def user_ban_reason(self) -> str | None:
+        return getattr(self.user, "ban_reason", None) if self.user else None
 
     @property
     def user_full_name(self) -> str | None:

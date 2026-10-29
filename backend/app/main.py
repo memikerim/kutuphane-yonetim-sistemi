@@ -51,6 +51,7 @@ async def lifespan(_app: FastAPI):
                 try:
                     conn.execute(text("SELECT approval_status FROM borrowings LIMIT 1"))
                     conn.execute(text("SELECT 1 FROM stock_movements LIMIT 1"))
+                    conn.execute(text("SELECT is_banned FROM users LIMIT 1"))
                 except Exception:
                     need_schema_upgrade = True
         except Exception:
@@ -91,6 +92,21 @@ async def lifespan(_app: FastAPI):
                     conn.execute(
                         text(
                             "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE NOT NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(500)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP WITH TIME ZONE"
                         )
                     )
             except Exception as e:

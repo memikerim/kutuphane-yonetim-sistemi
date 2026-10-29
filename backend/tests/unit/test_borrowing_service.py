@@ -567,5 +567,134 @@ def test_approval_workflow_and_damaged_lost_stock_history(db_session, test_user,
     assert len(history.stock_movements) >= 4
 
 
+def test_ban_user_and_lost_damaged_blocking_and_alerts(
+    db_session, test_user, test_book
+):
+    from app.modules.admin import service as admin_service
+    from app.modules.auth import service as auth_service
+    from app.modules.borrowing.schemas import AdminApproveReturnRequest, BorrowingReturn
+    from app.modules.catalog.models import Book
+    from app.modules.review import service as review_service
+    from app.modules.review.schemas import ReviewCreate
+
+    admin_user = User(
+        email="admin_ban_test@kutuphane.com",
+        password_hash="hashed",
+        first_name="Ban",
+        last_name="Admin",
+    )
+    db_session.add(admin_user)
+    second_book = Book(
+        title="İkinci Test Kitabı",
+        isbn="9789750000099",
+        published_year=2024,
+        stock_count=2,
+    )
+    db_session.add(second_book)
+    db_session.commit()
+
+    # 1. Kullanıcı kitabı ödünç alır ve KAYIP (LOST) olarak iade talebine gönderir
+    borrow = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(
+            book_id=test_book.id,
+            due_date=date.today() + timedelta(days=10),
+        ),
+    )
+    ret_lost_pending = service.return_borrowing(
+        db_session,
+        test_user,
+        borrow.id,
+        BorrowingReturn(
+            request_approval=True,
+            return_condition="LOST",
+            return_notes="Kitabı kaybettim",
+        ),
+    )
+    assert ret_lost_pending.approval_status == "PENDING_RETURN"
+    assert ret_lost_pending.return_condition == "LOST"
+    assert ret_lost_pending.damage_penalty == 250.0
+    assert ret_lost_pending.penalty_amount == 250.0
+
+    # 2. Kullanıcı kayıp/hasar ücretini ödemeden yeni kitap ödünç alamaz!
+    with pytest.raises(service.BusinessRuleError) as exc_info:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(
+                book_id=second_book.id,
+                due_date=date.today() + timedelta(days=7),
+            ),
+        )
+    assert "hasar/kayıp" in str(exc_info.value) or "gecikme cezanız" in str(exc_info.value)
+
+    # 3. Admin kayıp iadesini onayladığında stok hareketlerinde quantity_change == -1 görünür
+    service.admin_approve_return(
+        db_session,
+        admin_user,
+        borrow.id,
+        AdminApproveReturnRequest(
+            return_condition="LOST",
+            damage_penalty=250.0,
+            withdraw_from_stock=True,
+        ),
+    )
+    summary = service.get_stock_movements_summary(db_session, book_id=test_book.id)
+    assert summary.lost_count == 1
+    assert summary.total_damage_lost_penalty == 250.0
+    return_lost_mov = next(m for m in summary.items if m.movement_type == "RETURN_LOST")
+    assert return_lost_mov.quantity_change == -1
+    assert return_lost_mov.stock_before == return_lost_mov.stock_after + 1
+
+    # 4. Ceza ödendiğinde borç bloku kalkar; ancak Admin kullanıcıyı banlarsa (not düşerek)
+    # ödünç alma, rezervasyon ve yorum yapma engellenir!
+    service.pay_borrowing_penalty(db_session, test_user, borrow.id)
+
+    ban_note = "Kitap iadeniz yapılana kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır."
+    banned_info = admin_service.ban_user(db_session, admin_user, test_user.id, ban_note)
+    assert banned_info.is_banned is True
+    assert banned_info.ban_reason == ban_note
+
+    # Giriş sonrası /auth/me uyarı bilgisinde ban durumu görünür
+    me_alert = auth_service.build_user_read_with_alerts(db_session, test_user)
+    assert me_alert.is_banned is True
+    assert me_alert.ban_reason == ban_note
+
+    with pytest.raises(service.BusinessRuleError) as ban_exc:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(
+                book_id=second_book.id,
+                due_date=date.today() + timedelta(days=7),
+            ),
+        )
+    assert ban_note in str(ban_exc.value)
+
+    with pytest.raises(review_service.BusinessRuleError) as rev_exc:
+        review_service.create_review(
+            db_session,
+            test_user,
+            ReviewCreate(book_id=test_book.id, rating=5, comment="Harika bir eser"),
+        )
+    assert ban_note in str(rev_exc.value)
+
+    # 5. Admin banı kaldırdığında kullanıcı tekrar ödünç alabilir ve yorum yapabilir
+    unbanned_info = admin_service.unban_user(db_session, admin_user, test_user.id)
+    assert unbanned_info.is_banned is False
+
+    new_borrow = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(
+            book_id=second_book.id,
+            due_date=date.today() + timedelta(days=7),
+        ),
+    )
+    assert new_borrow.id is not None
+
+
+
 
 

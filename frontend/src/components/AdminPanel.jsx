@@ -26,6 +26,7 @@ import {
   Info,
   History,
   FileWarning,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -38,6 +39,11 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
   const [categories, setCategories] = useState([]);
   const [publishers, setPublishers] = useState([]);
   const [borrowings, setBorrowings] = useState([]);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [banModalUser, setBanModalUser] = useState(null);
+  const [banReasonInput, setBanReasonInput] = useState('');
+  const [banSubmitting, setBanSubmitting] = useState(false);
   const [simulatingId, setSimulatingId] = useState(null);
   const [workflowFilter, setWorkflowFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'ACTIVE'
   const [processingWorkflowId, setProcessingWorkflowId] = useState(null);
@@ -126,6 +132,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
         penaltiesRes,
         logsRes,
         stockRes,
+        usersRes,
       ] = await Promise.all([
         api.getBooks({ page: 1, limit: 100 }),
         api.getAuthors(),
@@ -143,6 +150,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
           total_damage_lost_penalty: 0,
           items: [],
         })),
+        api.getAdminUsers().catch(() => []),
       ]);
       const bookItems = booksRes?.items || [];
       setBooks(bookItems);
@@ -152,6 +160,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
       setBorrowings(borrowingsRes || []);
       setUnpaidPenalties(penaltiesRes || { total_unpaid_amount: 0, debtor_count: 0, items: [] });
       setSystemLogs(logsRes || []);
+      setAdminUsers(usersRes || []);
       setStockSummary(
         stockRes || {
           total_movements: 0,
@@ -168,6 +177,57 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
       notify(err.message || 'Katalog verileri yüklenemedi', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openBanUserModal = (userObj) => {
+    setBanModalUser(userObj);
+    setBanReasonInput(
+      userObj.ban_reason ||
+        'Kitap iadeniz yapılana ve gecikme/hasar/kayıp borcunuz ödenene kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır.'
+    );
+  };
+
+  const handleBanUserSubmit = async (e) => {
+    e.preventDefault();
+    if (!banModalUser) return;
+    if (!banReasonInput.trim() || banReasonInput.trim().length < 5) {
+      notify('Lütfen en az 5 karakterlik bir banlama/kısıtlama sebebi girin.', 'error');
+      return;
+    }
+    setBanSubmitting(true);
+    try {
+      await api.banUser(banModalUser.id, banReasonInput.trim());
+      notify(
+        `"${banModalUser.full_name}" kullanıcısı kısıtlandı (banlandı). Kullanıcı giriş yaptığında uyarı penceresi gösterilecektir.`,
+        'success'
+      );
+      setBanModalUser(null);
+      await loadAllCatalogData();
+    } catch (err) {
+      notify(err.message || 'Kullanıcı banlanamadı', 'error');
+    } finally {
+      setBanSubmitting(false);
+    }
+  };
+
+  const handleUnbanUser = async (userId, fullName) => {
+    if (
+      !window.confirm(
+        `"${fullName}" adlı kullanıcının banını (hesap kısıtlamasını) kaldırmak istediğinize emin misiniz?`
+      )
+    ) {
+      return;
+    }
+    setBanSubmitting(true);
+    try {
+      await api.unbanUser(userId);
+      notify(`"${fullName}" kullanıcısının banı başarıyla kaldırıldı!`, 'success');
+      await loadAllCatalogData();
+    } catch (err) {
+      notify(err.message || 'Ban kaldırılamadı', 'error');
+    } finally {
+      setBanSubmitting(false);
     }
   };
 
@@ -970,6 +1030,27 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
           </button>
 
           <button
+            onClick={() => setSubTab('users')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              subTab === 'users'
+                ? 'bg-rose-700 text-white shadow-xs'
+                : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" />
+            Üyeler & Ban Yönetimi ({adminUsers.length})
+            {adminUsers.some((u) => u.is_banned) && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+                  subTab === 'users' ? 'bg-white text-rose-800' : 'bg-rose-600 text-white'
+                }`}
+              >
+                {adminUsers.filter((u) => u.is_banned).length} Banlı
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setSubTab('logs')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
               subTab === 'logs'
@@ -982,7 +1063,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
           </button>
         </div>
 
-        {!['borrowings', 'stock_reports', 'penalties', 'logs'].includes(subTab) && (
+        {!['borrowings', 'stock_reports', 'penalties', 'users', 'logs'].includes(subTab) && (
           <button
             onClick={() =>
               openCreateModal(
@@ -1098,7 +1179,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                 <AlertTriangle className="w-5 h-5 text-amber-600" />
               </div>
               <div className="text-2xl font-extrabold text-amber-900 mt-2">
-                {stockSummary?.damaged_count || 0} Adet
+                {stockSummary?.damaged_count ?? stockSummary?.damaged_reports_count ?? 0} Adet
               </div>
               <p className="text-[11px] text-amber-800/90 mt-1">
                 İade kontrolünde veya rafta tespit edilen hasarlar
@@ -1113,10 +1194,10 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                 <FileWarning className="w-5 h-5 text-rose-600" />
               </div>
               <div className="text-2xl font-extrabold text-rose-900 mt-2">
-                {stockSummary?.lost_count || 0} Adet
+                {stockSummary?.lost_count ?? stockSummary?.lost_reports_count ?? 0} Adet
               </div>
               <p className="text-[11px] text-rose-700/90 mt-1">
-                Kaybedilen ve stoktan kalıcı düşülen kitaplar
+                Kaybedilen ve stoktan kalıcı düşülen kitaplar (-1 stok)
               </p>
             </div>
 
@@ -1128,7 +1209,12 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                 <Receipt className="w-5 h-5 text-indigo-600" />
               </div>
               <div className="text-2xl font-extrabold text-indigo-900 mt-2">
-                {Number(stockSummary?.total_damage_lost_penalty || 0).toFixed(2)} TL
+                {Number(
+                  stockSummary?.total_damage_lost_penalty ??
+                    stockSummary?.total_compensation_amount ??
+                    0
+                ).toFixed(2)}{' '}
+                TL
               </div>
               <p className="text-[11px] text-indigo-700/90 mt-1">
                 Hasarlı ve kayıp kitaplardan yansıtılan toplam tazminat
@@ -1156,7 +1242,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Hasar Raporları ({stockSummary?.damaged_count || 0})
+                Hasar Raporları ({stockSummary?.damaged_count ?? stockSummary?.damaged_reports_count ?? 0})
               </button>
               <button
                 onClick={() => setStockFilter('LOST')}
@@ -1166,7 +1252,7 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Kayıp Raporları ({stockSummary?.lost_count || 0})
+                Kayıp Raporları ({stockSummary?.lost_count ?? stockSummary?.lost_reports_count ?? 0})
               </button>
               <button
                 onClick={() => setStockFilter('RESTOCK')}
@@ -1641,11 +1727,56 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                         }`}
                       >
                         <td className="py-3.5 px-4">
-                          <div className="font-semibold text-slate-900">
-                            {item.user_full_name || 'Kullanıcı'}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-semibold text-slate-900">
+                              {item.user_full_name || 'Kullanıcı'}
+                            </span>
+                            {item.user_is_banned && (
+                              <span
+                                title={item.user_ban_reason || 'Hesap kısıtlı'}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white"
+                              >
+                                BANLI
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-500">
                             {item.user_email || item.user_id}
+                          </div>
+                          {item.user_is_banned && item.user_ban_reason && (
+                            <div className="text-[10px] text-rose-700 font-semibold mt-0.5 max-w-[220px] line-clamp-2">
+                              Ban Notu: {item.user_ban_reason}
+                            </div>
+                          )}
+                          <div className="mt-1">
+                            {item.user_is_banned ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUnbanUser(item.user_id, item.user_full_name || 'Kullanıcı')
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-pointer"
+                              >
+                                <Check className="w-3 h-3" />
+                                Banı Kaldır
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openBanUserModal({
+                                    id: item.user_id,
+                                    full_name: item.user_full_name || 'Kullanıcı',
+                                    email: item.user_email || '',
+                                    ban_reason: item.user_ban_reason || '',
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer"
+                              >
+                                <ShieldAlert className="w-3 h-3" />
+                                Üyeyi Banla / Kısıtla
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className="py-3.5 px-4">
@@ -1918,6 +2049,11 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                           <span className="text-slate-500">
                             ({m.stock_before} &rarr; <strong>{m.stock_after}</strong>)
                           </span>
+                          {(isLost || (isDamage && m.quantity_change < 0)) && (
+                            <span className="block text-[10px] font-sans font-bold text-rose-600 mt-0.5">
+                              Stoktan Kalıcı Düşüldü (-1)
+                            </span>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 text-xs">
                           {m.user_full_name ? (
@@ -1979,10 +2115,55 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                     return (
                       <tr key={item.borrowing_id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-3.5 px-4">
-                          <div className="font-semibold text-slate-900">
-                            {item.user_full_name}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-semibold text-slate-900">
+                              {item.user_full_name}
+                            </span>
+                            {item.user_is_banned && (
+                              <span
+                                title={item.user_ban_reason || 'Hesap kısıtlı'}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white"
+                              >
+                                BANLI
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-500">{item.user_email}</div>
+                          {item.user_is_banned && item.user_ban_reason && (
+                            <div className="text-[10px] text-rose-700 font-semibold mt-0.5 max-w-[220px] line-clamp-2">
+                              Ban Notu: {item.user_ban_reason}
+                            </div>
+                          )}
+                          <div className="mt-1">
+                            {item.user_is_banned ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUnbanUser(item.user_id, item.user_full_name || 'Kullanıcı')
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-pointer"
+                              >
+                                <Check className="w-3 h-3" />
+                                Banı Kaldır
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openBanUserModal({
+                                    id: item.user_id,
+                                    full_name: item.user_full_name || 'Kullanıcı',
+                                    email: item.user_email || '',
+                                    ban_reason: item.user_ban_reason || '',
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer"
+                              >
+                                <ShieldAlert className="w-3 h-3" />
+                                Üyeyi Banla / Kısıtla
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="font-semibold text-slate-800">
@@ -2058,6 +2239,149 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                 )}
               </tbody>
             </table>
+          )}
+
+          {/* Üyeler & Ban Yönetimi Tablosu (subTab === 'users') */}
+          {subTab === 'users' && (
+            <div>
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    placeholder="Üye adı veya e-posta adresi ile ara..."
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+                <span className="text-xs text-slate-500">
+                  Banlanan üyeler giriş yaptığında ban sebebi açılır pencere (popup) olarak gösterilir; yeni ödünç, rezervasyon ve yorum işlemleri kapatılır.
+                </span>
+              </div>
+
+              <table className="w-full text-left border-collapse min-w-[840px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    <th className="py-3.5 px-4">Üye Bilgisi</th>
+                    <th className="py-3.5 px-4">Yetki / Rol</th>
+                    <th className="py-3.5 px-4">Ödünç & Gecikme Durumu</th>
+                    <th className="py-3.5 px-4">Açık Borç (TL)</th>
+                    <th className="py-3.5 px-4">Hesap Durumu & Ban Notu</th>
+                    <th className="py-3.5 px-4 text-right">Ban / Kısıtlama İşlemi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {adminUsers
+                    .filter((u) => {
+                      const q = userSearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        (u.full_name || '').toLowerCase().includes(q) ||
+                        (u.email || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((u) => {
+                      const isAdminUser = (u.roles || []).includes('ADMIN');
+                      return (
+                        <tr
+                          key={u.id}
+                          className={`transition-colors ${
+                            u.is_banned ? 'bg-rose-50/40 hover:bg-rose-50/70' : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="py-3.5 px-4">
+                            <div className="font-semibold text-slate-900">{u.full_name}</div>
+                            <div className="text-xs text-slate-500">{u.email}</div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {isAdminUser ? (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                ADMIN
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
+                                ÜYE (USER)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-xs">
+                            <div>
+                              Aktif Ödünç: <strong>{u.active_borrowings_count || 0} Kitap</strong>
+                            </div>
+                            {(u.overdue_books_count || 0) > 0 && (
+                              <span className="inline-block mt-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-600 text-white">
+                                {u.overdue_books_count} Gecikmiş Kitap!
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {Number(u.unpaid_penalty_total || 0) > 0 ? (
+                              <span className="font-extrabold text-rose-700 text-xs">
+                                {Number(u.unpaid_penalty_total).toFixed(2)} TL
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400">0.00 TL</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 max-w-xs">
+                            {u.is_banned ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-600 text-white">
+                                  <ShieldAlert className="w-3.5 h-3.5" />
+                                  BANLI (Kısıtlı Hesap)
+                                </span>
+                                {u.ban_reason && (
+                                  <p className="text-xs text-rose-800 font-medium leading-snug">
+                                    "{u.ban_reason}"
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Aktif
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            {isAdminUser ? (
+                              <span className="text-xs text-slate-400 italic">Yönetici Hesabı</span>
+                            ) : u.is_banned ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openBanUserModal(u)}
+                                  className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold cursor-pointer"
+                                >
+                                  Ban Notunu Düzenle
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnbanUser(u.id, u.full_name)}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  Banı Kaldır
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openBanUserModal(u)}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                              >
+                                <ShieldAlert className="w-3.5 h-3.5" />
+                                Kullanıcıyı Banla / Not Düş
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {/* Sistem Logları Tablosu */}
@@ -2992,6 +3316,102 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white shadow-sm cursor-pointer"
                 >
                   {stockSaving ? 'Kaydediliyor...' : 'Raporu Kaydet & Stoğu Güncelle'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: Kullanıcı Banlama & Kısıtlama Notu Modalı */}
+      {banModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border-2 border-rose-300 w-full max-w-lg overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-rose-50 border-b border-rose-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-rose-950">
+                    Kullanıcıyı Banla / Hesabı Kısıtla
+                  </h3>
+                  <p className="text-xs text-rose-700">
+                    {banModalUser.full_name} ({banModalUser.email})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setBanModalUser(null)}
+                className="p-1.5 rounded-lg text-rose-500 hover:text-rose-800 hover:bg-rose-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleBanUserSubmit} className="p-6 space-y-4">
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <p className="font-bold">Banlama / Kısıtlama Nasıl Çalışır?</p>
+                <p>
+                  • Banlanan kullanıcı hesabına giriş yaptığında ekranda <strong>açılır pencere (popup)</strong> olarak aşağıya yazdığınız ban sebebi gösterilir.
+                </p>
+                <p>
+                  • Kullanıcı elindeki kitabı iade edebilir ve borçlarını ödeyebilir; ancak ban kaldırılana kadar <strong>yeni kitap ödünç alamaz, rezervasyon yapamaz ve yorum bırakamaz</strong>.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="block text-[11px] font-bold text-slate-600">
+                  Hızlı Şablon Sebepler (Tıklayarak Seçebilirsiniz):
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {[
+                    'Kitap iadeniz yapılana kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır.',
+                    'Gecikme ücretinizi ve kayıp/hasar tazminat borcunuzu ödeyene kadar hesabınız yeni ödünç alma, rezervasyon ve yorum işlemlerine kapatılmıştır.',
+                    'Kütüphane kullanım ve topluluk kuralları ihlali nedeniyle hesabınız yönetici tarafından geçici olarak kısıtlanmıştır.',
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setBanReasonInput(preset)}
+                      className="text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-xs text-slate-700 hover:text-rose-900 transition-colors cursor-pointer"
+                    >
+                      "{preset}"
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Kullanıcıya Gösterilecek Ban Sebebi / Yönetici Notu *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  minLength={5}
+                  value={banReasonInput}
+                  onChange={(e) => setBanReasonInput(e.target.value)}
+                  placeholder="Örn: Kitap iadeniz yapılana kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-rose-300 bg-white text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setBanModalUser(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={banSubmitting}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                  {banSubmitting ? 'Uygulanıyor...' : 'Kullanıcıyı Banla & Notu Kaydet'}
                 </button>
               </div>
             </form>
