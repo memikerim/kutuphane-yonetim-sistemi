@@ -49,6 +49,24 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
   const [borrowingPage, setBorrowingPage] = useState(1);
   const [nowMs, setNowMs] = useState(Date.now());
 
+  // Rezerve Kitap Ödünç Alma Modalı State'leri
+  const [reserveBorrowModalItem, setReserveBorrowModalItem] = useState(null);
+  const [reserveDueDate, setReserveDueDate] = useState('');
+  const [reserveNotes, setReserveNotes] = useState('');
+  const [reserveSubmitting, setReserveSubmitting] = useState(false);
+
+  // Ceza Ödeme Onay Modalı State'i
+  const [payPenaltyModalItem, setPayPenaltyModalItem] = useState(null);
+  const [payPenaltySubmitting, setPayPenaltySubmitting] = useState(false);
+
+  // Rezervasyon İptal Onay Modalı State'i
+  const [cancelResModalItem, setCancelResModalItem] = useState(null);
+  const [cancelResSubmitting, setCancelResSubmitting] = useState(false);
+
+  // Ödünç Talebi İptal Onay Modalı State'i
+  const [cancelBorrowModalItem, setCancelBorrowModalItem] = useState(null);
+  const [cancelBorrowSubmitting, setCancelBorrowSubmitting] = useState(false);
+
   // İade & Fiziksel Durum Kontrol Modalı State'leri
   const [returnModalItem, setReturnModalItem] = useState(null);
   const [returnCondition, setReturnCondition] = useState('GOOD'); // 'GOOD' | 'DAMAGED' | 'LOST'
@@ -160,35 +178,39 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
     }
   };
 
-  const handleCancelBorrowRequest = async (borrowingId) => {
-    if (
-      !window.confirm(
-        'Henüz görevli tarafından onaylanmamış bu ödünç talebini iptal etmek istediğinize emin misiniz? (Ayrılan stok rafa geri eklenecektir)'
-      )
-    ) {
-      return;
-    }
+  // 1. Ödünç Talebini İptal Etme Modalı
+  const openCancelBorrowModal = (borrowing) => {
+    setCancelBorrowModalItem(borrowing);
+  };
+
+  const handleConfirmCancelBorrow = async () => {
+    if (!cancelBorrowModalItem) return;
+    const borrowingId = cancelBorrowModalItem.id;
+    setCancelBorrowSubmitting(true);
     setCancellingBorrowId(borrowingId);
     try {
       await api.cancelBorrowRequest(borrowingId);
       notify('Ödünç talebiniz iptal edildi ve ayrılan stok (+1) rafa geri eklendi.', 'info');
+      setCancelBorrowModalItem(null);
       await fetchAll();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
       notify(err.message || 'Ödünç talebi iptal edilemedi', 'error');
     } finally {
+      setCancelBorrowSubmitting(false);
       setCancellingBorrowId(null);
     }
   };
 
-  const handlePayPenalty = async (borrowingId, amount) => {
-    if (
-      !window.confirm(
-        `${amount} TL tutarındaki ceza/tazminat borcunu ödemek istiyor musunuz?\n\nNot: Ödemeniz görevli onayına iletilecek ve yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alma ve rezervasyon işlemleriniz kısıtlı kalacaktır.`
-      )
-    ) {
-      return;
-    }
+  // 2. Ceza Ödeme Modalı
+  const openPayPenaltyModal = (borrowingId, amount, item) => {
+    setPayPenaltyModalItem({ borrowingId, amount, item });
+  };
+
+  const handleConfirmPayPenalty = async () => {
+    if (!payPenaltyModalItem) return;
+    const { borrowingId, amount } = payPenaltyModalItem;
+    setPayPenaltySubmitting(true);
     setPayingPenaltyId(borrowingId);
     try {
       await api.payPenalty(borrowingId);
@@ -196,62 +218,81 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
         `${amount} TL tutarındaki ödemeniz iletildi! Yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alma ve rezervasyon işlemleriniz kapalı kalacaktır.`,
         'info'
       );
+      setPayPenaltyModalItem(null);
       await fetchAll();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
       notify(err.message || 'Ceza ödeme işlemi başarısız', 'error');
     } finally {
+      setPayPenaltySubmitting(false);
       setPayingPenaltyId(null);
     }
   };
 
-  const handleBorrowReservedBook = async (res) => {
+  // 3. Rezerve Kitap Ödünç Alma Modalı
+  const openReserveBorrowModal = (res) => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    setReserveDueDate(d.toISOString().split('T')[0]);
+    setReserveNotes('Rezervasyon sırasından ödünç talep edildi');
+    setReserveBorrowModalItem(res);
+  };
+
+  const handleConfirmReserveBorrowSubmit = async (e) => {
+    e.preventDefault();
+    if (!reserveBorrowModalItem) return;
+
+    const res = reserveBorrowModalItem;
     const bookTitle = bookMap[res.book_id]?.title || 'Kitap';
-    if (
-      !window.confirm(
-        `"${bookTitle}" için rezerve sıranızı kullanarak ödünç talebi oluşturmak istiyor musunuz?`
-      )
-    ) {
-      return;
-    }
+
+    setReserveSubmitting(true);
     setBorrowingResId(res.id);
     try {
-      const d = new Date();
-      d.setDate(d.getDate() + 14);
-      const dueDateStr = d.toISOString().split('T')[0];
+      const dStr =
+        reserveDueDate ||
+        new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
 
       await api.borrowBook({
         book_id: res.book_id,
-        due_date: dueDateStr,
+        due_date: dStr,
         request_approval: true,
-        notes: 'Rezervasyon sırasından ödünç talep edildi',
+        notes: reserveNotes || 'Rezervasyon sırasından ödünç talep edildi',
       });
       notify(
-        `"${bookTitle}" için ödünç talebiniz oluşturuldu ve görevli onay kuyruğuna iletildi!`,
+        `"${bookTitle}" için ödünç talebiniz başarıyla oluşturuldu ve görevli onay kuyruğuna iletildi!`,
         'success'
       );
+      setReserveBorrowModalItem(null);
       await fetchAll();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
       notify(err.message || 'Ödünç alma işlemi başarısız', 'error');
     } finally {
+      setReserveSubmitting(false);
       setBorrowingResId(null);
     }
   };
 
-  const handleCancelReservation = async (resId) => {
-    if (!window.confirm('Bu rezervasyonu iptal edip sıradan çıkmak istediğinize emin misiniz?')) {
-      return;
-    }
+  // 4. Rezervasyon İptal Modalı
+  const openCancelResModal = (res) => {
+    setCancelResModalItem(res);
+  };
+
+  const handleConfirmCancelRes = async () => {
+    if (!cancelResModalItem) return;
+    const resId = cancelResModalItem.id;
+    setCancelResSubmitting(true);
     setCancellingResId(resId);
     try {
       await api.cancelReservation(resId);
       notify('Rezervasyonunuz iptal edildi ve listeden kaldırıldı.', 'info');
+      setCancelResModalItem(null);
       await fetchAll();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
       notify(err.message || 'Rezervasyon iptal edilemedi', 'error');
     } finally {
+      setCancelResSubmitting(false);
       setCancellingResId(null);
     }
   };
@@ -748,7 +789,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         <div className="pt-2 flex flex-wrap justify-end gap-2">
                           {isPendingBorrow && (
                             <button
-                              onClick={() => handleCancelBorrowRequest(item.id)}
+                              onClick={() => openCancelBorrowModal(item)}
                               disabled={cancellingBorrowId === item.id}
                               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-all cursor-pointer disabled:opacity-60"
                             >
@@ -787,7 +828,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                               </button>
                             ) : (
                               <button
-                                onClick={() => handlePayPenalty(item.id, penaltyAmount)}
+                                onClick={() => openPayPenaltyModal(item.id, penaltyAmount, item)}
                                 disabled={payingPenaltyId === item.id}
                                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
                               >
@@ -950,7 +991,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         <div className="inline-flex items-center gap-2">
                           {canBorrow && (
                             <button
-                              onClick={() => handleBorrowReservedBook(res)}
+                              onClick={() => openReserveBorrowModal(res)}
                               disabled={borrowingResId === res.id}
                               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                             >
@@ -959,7 +1000,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                             </button>
                           )}
                           <button
-                            onClick={() => handleCancelReservation(res.id)}
+                            onClick={() => openCancelResModal(res)}
                             disabled={cancellingResId === res.id}
                             title="Rezervasyonu İptal Et ve Listeden Sil"
                             className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition-colors cursor-pointer"
@@ -1128,6 +1169,284 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rezerve Kitap Ödünç Alma Modalı (Web Sitesi İçi Açılır Pencere) */}
+      {reserveBorrowModalItem && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-5 sm:p-6 flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0 mt-0.5">
+                  <BookmarkCheck className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-white/20 text-white mb-1">
+                    REZERVE SIRANIZ KULLANILIYOR
+                  </span>
+                  <h3 className="text-base sm:text-lg font-extrabold leading-snug">
+                    Rezerve Kitabı Ödünç Alma Onayı
+                  </h3>
+                  <p className="text-xs text-emerald-100 mt-0.5">
+                    Kitap stoğu adınıza ayrıldı. Bilgilerinizi kontrol edip onaylayabilirsiniz.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReserveBorrowModalItem(null)}
+                className="p-1.5 rounded-xl text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form & Body */}
+            <form onSubmit={handleConfirmReserveBorrowSubmit} className="p-5 sm:p-6 space-y-4">
+              {/* Kitap Bilgi Kartı */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-slate-900 text-sm sm:text-base leading-snug">
+                      {bookMap[reserveBorrowModalItem.book_id]?.title || 'Kitap'}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                      ISBN: {bookMap[reserveBorrowModalItem.book_id]?.isbn || '-'}
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                    Sıra Sizde (1. Sıra)
+                  </span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                  <span className="text-slate-500 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                    Kalan Rezerve Süresi:
+                  </span>
+                  <span className="font-bold font-mono text-emerald-700">
+                    {formatRemainingCountdown(reserveBorrowModalItem.expires_at, nowMs)?.text || 'Süre Aktif'}
+                  </span>
+                </div>
+              </div>
+
+              {/* İade Tarihi Seçimi */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Planlanan İade Tarihi (due_date) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="date"
+                    required
+                    min={new Date().toISOString().split('T')[0]}
+                    value={reserveDueDate}
+                    onChange={(e) => setReserveDueDate(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Standart ödünç verme süresi 14 gündür. Süre bitiminde iade edilmezse günlük 10 TL gecikme ücreti tahakkuk eder.
+                </p>
+              </div>
+
+              {/* Açıklama / Not */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Ödünç Alma Notu (İsteğe Bağlı)
+                </label>
+                <input
+                  type="text"
+                  value={reserveNotes}
+                  onChange={(e) => setReserveNotes(e.target.value)}
+                  placeholder="Not ekleyebilirsiniz..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Bilgilendirme Kutusu */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 leading-relaxed">
+                <strong>İş Akışı Bilgisi:</strong> Onay verdiğinizde ödünç alma talebiniz görevli kuyruğuna iletilecek ve rezervasyon sıranız başarıyla ödünç kaydına dönüştürülecektir.
+              </div>
+
+              {/* Modal Butonları */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setReserveBorrowModalItem(null)}
+                  disabled={reserveSubmitting}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={reserveSubmitting}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white shadow-sm shadow-emerald-200 transition-all cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  {reserveSubmitting ? 'Talebiniz Oluşturuluyor...' : 'Ödünç Talebini Onayla & Gönder'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Ceza Ödeme Onay Modalı */}
+      {payPenaltyModalItem && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white p-5 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
+                  <Banknote className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold">Ceza / Tazminat Borcu Ödeme</h3>
+                  <p className="text-xs text-amber-100">Ödeme bildirimi onayı</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPayPenaltyModalItem(null)}
+                className="p-1 rounded-lg text-white/80 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-center space-y-1">
+                <span className="text-xs text-amber-800 font-medium">Ödenecek Toplam Tutar</span>
+                <div className="text-2xl font-black text-amber-950">
+                  {Number(payPenaltyModalItem.amount || 0).toFixed(2)} TL
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed space-y-1.5">
+                <p className="font-bold text-slate-900">Önemli Süreç Bilgisi:</p>
+                <p>
+                  Ödemeniz iletildiğinde sistemde <strong>"Ödeme Onayı Bekliyor"</strong> durumuna alınır. Kütüphane yöneticisi ödemeyi teslim aldığını onaylayana kadar yeni kitap ödünç alma ve rezervasyon işlemleriniz kapalı kalacaktır.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPayPenaltyModalItem(null)}
+                  disabled={payPenaltySubmitting}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPayPenalty}
+                  disabled={payPenaltySubmitting}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white cursor-pointer"
+                >
+                  <Banknote className="w-4 h-4" />
+                  {payPenaltySubmitting ? 'İletiliyor...' : 'Ödemeyi Bildir & Onayla'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rezervasyon İptal Onay Modalı */}
+      {cancelResModalItem && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-rose-50 border-b border-rose-100 p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <h3 className="text-sm font-extrabold text-slate-900">Rezervasyonu İptal Et</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancelResModalItem(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 text-xs text-slate-600">
+              <p>
+                <strong>"{bookMap[cancelResModalItem.book_id]?.title || 'Kitap'}"</strong> için oluşturduğunuz rezervasyonu iptal edip sıradan çıkmak istediğinize emin misiniz?
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCancelResModalItem(null)}
+                  disabled={cancelResSubmitting}
+                  className="px-4 py-2 rounded-xl font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancelRes}
+                  disabled={cancelResSubmitting}
+                  className="px-4 py-2 rounded-xl font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white cursor-pointer"
+                >
+                  {cancelResSubmitting ? 'İptal Ediliyor...' : 'Evet, Rezervasyonu İptal Et'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bekleyen Ödünç Talebini İptal Onay Modalı */}
+      {cancelBorrowModalItem && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-slate-50 border-b border-slate-200 p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-slate-200 text-slate-700 flex items-center justify-center">
+                  <X className="w-5 h-5" />
+                </div>
+                <h3 className="text-sm font-extrabold text-slate-900">Ödünç Talebini İptal Et</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancelBorrowModalItem(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 text-xs text-slate-600">
+              <p>
+                Henüz görevli tarafından onaylanmamış bu ödünç talebini iptal etmek istediğinize emin misiniz? Sizin adınıza ayrılan kitap stoğu (+1) rafa geri eklenecektir.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCancelBorrowModalItem(null)}
+                  disabled={cancelBorrowSubmitting}
+                  className="px-4 py-2 rounded-xl font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancelBorrow}
+                  disabled={cancelBorrowSubmitting}
+                  className="px-4 py-2 rounded-xl font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white cursor-pointer"
+                >
+                  {cancelBorrowSubmitting ? 'İptal Ediliyor...' : 'Evet, Talebi İptal Et'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
