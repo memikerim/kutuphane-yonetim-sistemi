@@ -42,6 +42,9 @@ class BorrowingRead(BaseModel):
     user_ban_reason: str | None = None
     book_title: str | None = None
     book_isbn: str | None = None
+    book_cover_url: str | None = None
+    book_author: str | None = None
+    is_rejection_read: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

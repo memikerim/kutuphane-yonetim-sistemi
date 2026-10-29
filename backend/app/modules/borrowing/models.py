@@ -81,6 +81,9 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     )
     return_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     admin_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_rejection_read: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     user: Mapped["User"] = relationship(back_populates="borrowings", lazy="selectin")
     book: Mapped["Book"] = relationship(back_populates="borrowings", lazy="selectin")
@@ -118,6 +121,16 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     @property
     def book_isbn(self) -> str | None:
         return self.book.isbn if self.book else None
+
+    @property
+    def book_cover_url(self) -> str | None:
+        return self.book.cover_url if self.book else None
+
+    @property
+    def book_author(self) -> str | None:
+        if self.book and getattr(self.book, "authors", None):
+            return ", ".join(a.name for a in self.book.authors)
+        return None
 
     @property
     def user_is_banned(self) -> bool:
@@ -322,6 +335,16 @@ class StockMovement(UUIDPrimaryKeyMixin, Base):
     @property
     def book_isbn(self) -> str | None:
         return self.book.isbn if self.book else None
+
+    @property
+    def book_cover_url(self) -> str | None:
+        return self.book.cover_url if self.book else None
+
+    @property
+    def book_author(self) -> str | None:
+        if self.book and getattr(self.book, "authors", None):
+            return ", ".join(a.name for a in self.book.authors)
+        return None
 
     @property
     def user_is_banned(self) -> bool:

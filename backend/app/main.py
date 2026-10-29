@@ -107,6 +107,11 @@ async def lifespan(_app: FastAPI):
                     )
                     conn.execute(
                         text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_rejection_read BOOLEAN DEFAULT FALSE NOT NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
                             "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'"
                         )
                     )

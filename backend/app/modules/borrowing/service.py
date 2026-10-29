@@ -1062,6 +1062,22 @@ def admin_reject_borrow(
     return borrowing
 
 
+def mark_borrowing_rejection_as_read(
+    db: Session, borrowing_id: uuid.UUID, user: User
+) -> Borrowing:
+    """Kullanıcının reddedilen ödünç bildirimini okundu olarak işaretleyip bildirim merkezinden kaldırır."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.user_id != user.id and not getattr(user, "is_admin", False) and not (hasattr(user, "has_role") and user.has_role("ADMIN")):
+        raise ForbiddenError("Bu bildirim üzerinde işlem yapma yetkiniz yok")
+
+    borrowing.is_rejection_read = True
+    db.commit()
+    db.refresh(borrowing)
+    return borrowing
+
+
 def admin_approve_return(
     db: Session,
     admin_user: User,
@@ -1469,8 +1485,8 @@ def get_user_and_admin_notifications(
                 )
             )
 
-        # C6) Görevli Tarafından Reddedilen Ödünç Talebi (Kullanıcıya Reddetme Bildirimi)
-        if approval_st == "REJECTED":
+        # C6) Görevli Tarafından Reddedilen Ödünç Talebi (Kullanıcı henüz okumadı/kapatmadıysa)
+        if approval_st == "REJECTED" and not getattr(b, "is_rejection_read", False):
             reason = (
                 b.admin_notes
                 or "Kütüphane standartları veya stok durumu nedeniyle talep onaylanamadı."

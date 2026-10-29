@@ -145,6 +145,8 @@ export const api = {
     }),
   cancelBorrowRequest: (id) =>
     request(`/borrowings/${id}/cancel-request`, { method: 'POST' }),
+  dismissRejectionNotification: (id) =>
+    request(`/borrowings/${id}/dismiss-rejection`, { method: 'POST' }),
   payPenalty: (id) =>
     request(`/borrowings/${id}/pay-penalty`, { method: 'POST' }),
   approvePenaltyPayment: (id) =>

@@ -18,6 +18,7 @@ export default function NotificationCenter({
   user,
   isAdmin,
   onNotificationAction,
+  onDismissNotification,
 }) {
   const [open, setOpen] = useState(false);
   const [filterTab, setFilterTab] = useState('ALL'); // 'ALL' | 'ADMIN' | 'USER'
@@ -122,6 +123,9 @@ export default function NotificationCenter({
 
   const handleCardClick = (item) => {
     setOpen(false);
+    if (item.type === 'BORROW_REJECTED' && onDismissNotification) {
+      onDismissNotification(item);
+    }
     if (onNotificationAction) {
       onNotificationAction(item);
     }
@@ -264,13 +268,42 @@ export default function NotificationCenter({
                           </h4>
                         </div>
                       </div>
+
+                      {/* Bildirimi Kapat / Sil Butonu (Özellikle ret bildirimleri için) */}
+                      {item.type === 'BORROW_REJECTED' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onDismissNotification) onDismissNotification(item);
+                          }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
+                          title="Bildirimi Sil / Kapat"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
 
                     <p className="text-[11px] text-slate-600 leading-relaxed pl-6">
                       {item.message}
                     </p>
 
-                    <div className="flex items-center justify-end pt-1">
+                    <div className="flex items-center justify-between pt-1 pl-6">
+                      {item.type === 'BORROW_REJECTED' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onDismissNotification) onDismissNotification(item);
+                          }}
+                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer"
+                        >
+                          Anladım, Bildirimi Sil
+                        </button>
+                      ) : (
+                        <span />
+                      )}
                       <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-indigo-600 group-hover:text-indigo-800">
                         <span>{actionLabel}</span>
                         <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
@@ -284,10 +317,23 @@ export default function NotificationCenter({
 
           {/* Footer */}
           {filteredItems.length > 0 && (
-            <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-center">
+            <div className="p-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2">
               <span className="text-[10px] font-medium text-slate-500">
-                Bildirime tıklayarak doğrudan ilgili işlem ve onay kuyruğuna gidebilirsiniz.
+                Detay için bildirime tıklayın.
               </span>
+              {filteredItems.some((i) => i.type === 'BORROW_REJECTED') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    filteredItems
+                      .filter((i) => i.type === 'BORROW_REJECTED')
+                      .forEach((i) => onDismissNotification && onDismissNotification(i));
+                  }}
+                  className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer"
+                >
+                  Tüm Retleri Temizle
+                </button>
+              )}
             </div>
           )}
         </div>

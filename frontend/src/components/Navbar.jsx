@@ -21,6 +21,7 @@ export default function Navbar({
   onLogout,
   notifications,
   onNotificationAction,
+  onDismissNotification,
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -107,6 +108,7 @@ export default function Navbar({
                     user={user}
                     isAdmin={isAdmin}
                     onNotificationAction={onNotificationAction}
+                    onDismissNotification={onDismissNotification}
                   />
 
                   <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-xl">
@@ -172,6 +174,7 @@ export default function Navbar({
                   user={user}
                   isAdmin={isAdmin}
                   onNotificationAction={onNotificationAction}
+                  onDismissNotification={onDismissNotification}
                 />
               )}
               <button

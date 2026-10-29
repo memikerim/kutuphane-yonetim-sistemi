@@ -73,6 +73,18 @@ def pay_penalty(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
     return handle_service_error(service.pay_borrowing_penalty, db, current_user, id)
 
 
+@router.post(
+    "/borrowings/{id}/dismiss-rejection",
+    response_model=BorrowingRead,
+    summary="Ödünç talebi ret bildirimini okundu olarak işaretle / kaldır",
+)
+def dismiss_borrowing_rejection(id: uuid.UUID, db: DbSession, current_user: CurrentUser):
+    """
+    Kullanıcının reddedilen ödünç bildirimi üzerindeki bildirim uyarısını kapatır (is_rejection_read = True).
+    """
+    return handle_service_error(service.mark_borrowing_rejection_as_read, db, id, current_user)
+
+
 
 # --- Reservation Endpoints ---
 @router.post("/reservations", response_model=ReservationRead, status_code=status.HTTP_201_CREATED, summary="Kitap rezervasyonu yap")

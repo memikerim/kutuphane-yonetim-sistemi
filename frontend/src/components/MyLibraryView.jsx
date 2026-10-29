@@ -692,6 +692,27 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                                 {item.admin_notes || 'Kütüphane standartları veya stok durumu gereği talep onaylanamadı.'}
                               </span>
                             </p>
+                            {!item.is_rejection_read && (
+                              <div className="pt-1.5 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await api.dismissRejectionNotification(item.id);
+                                      item.is_rejection_read = true;
+                                      notify('Ret bildirimi okundu olarak kapatıldı.', 'info');
+                                      await fetchAll();
+                                      if (onCatalogChanged) onCatalogChanged();
+                                    } catch (err) {
+                                      notify(err.message || 'Bildirim kapatılamadı', 'error');
+                                    }
+                                  }}
+                                  className="text-[10px] font-bold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-300 transition-colors cursor-pointer"
+                                >
+                                  Bildirimi Okundu Olarak Kapat (Bildirim Merkezinden Sil)
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
 
