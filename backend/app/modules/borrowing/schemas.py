@@ -32,6 +32,8 @@ class BorrowingRead(BaseModel):
     admin_notes: str | None = None
     penalty_amount: float = 0.0
     is_penalty_paid: bool = False
+    penalty_payment_status: str = "UNPAID"
+    penalty_paid_at: datetime | None = None
     overdue_days: int = 0
     user_email: str | None = None
     user_full_name: str | None = None

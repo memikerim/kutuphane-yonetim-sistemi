@@ -158,12 +158,32 @@ def test_simulate_overdue_and_pay_penalty_flow_endpoints(
     )
     assert still_blocked.status_code == 400
 
-    # 7. Ceza ödenir -> POST /api/v1/borrowings/{id}/pay-penalty
+    # 7. Kullanıcı ceza ödemesi yapar -> POST /api/v1/borrowings/{id}/pay-penalty
+    # Kullanıcı ödediğinde durum PENDING_APPROVAL olur, yönetici onaylayana kadar is_penalty_paid=False kalır
     pay_resp = client.post(f"/api/v1/borrowings/{borrow_id}/pay-penalty", headers=auth_headers)
     assert pay_resp.status_code == 200
-    assert pay_resp.json()["is_penalty_paid"] is True
+    assert pay_resp.json()["penalty_payment_status"] == "PENDING_APPROVAL"
+    assert pay_resp.json()["is_penalty_paid"] is False
 
-    # 8. Artık yeni kitap ödünç alınabilir
+    # 8. Yönetici henüz onaylamadığı için kullanıcı hala yeni ödünç alamaz
+    pending_blocked = client.post(
+        "/api/v1/borrowings",
+        json={"book_id": str(book2.id), "due_date": str(date.today() + timedelta(days=10))},
+        headers=auth_headers,
+    )
+    assert pending_blocked.status_code == 400
+    assert "onaylanması beklenmektedir" in pending_blocked.json()["detail"]
+
+    # 9. Yönetici ödemeyi onaylar -> POST /api/v1/admin/borrowings/{id}/approve-payment
+    admin_approve_resp = client.post(
+        f"/api/v1/admin/borrowings/{borrow_id}/approve-payment",
+        headers=admin_headers,
+    )
+    assert admin_approve_resp.status_code == 200
+    assert admin_approve_resp.json()["penalty_payment_status"] == "PAID"
+    assert admin_approve_resp.json()["is_penalty_paid"] is True
+
+    # 10. Artık onaylandığı için yeni kitap ödünç alınabilir
     ok_borrow = client.post(
         "/api/v1/borrowings",
         json={"book_id": str(book2.id), "due_date": str(date.today() + timedelta(days=10))},

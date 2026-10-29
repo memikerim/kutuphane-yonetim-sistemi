@@ -107,11 +107,13 @@ def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
     unpaid_overdue_total = 0.0
     unpaid_damage_loss_total = 0.0
     unpaid_penalty_total = 0.0
+    pending_penalty_approval_count = 0
     alert_items: list[UserAlertItem] = []
 
     for b in borrowings:
         cond = (b.return_condition or "GOOD").upper()
         approval_st = b.approval_status or "APPROVED"
+        payment_st = getattr(b, "penalty_payment_status", "UNPAID")
         if b.status != BorrowingStatus.RETURNED and approval_st == "PENDING_BORROW":
             continue
 
@@ -130,6 +132,9 @@ def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
 
         if not (is_overdue_active or is_damaged_or_lost_pending or has_unpaid_penalty):
             continue
+
+        if payment_st == "PENDING_APPROVAL":
+            pending_penalty_approval_count += 1
 
         if b.status != BorrowingStatus.RETURNED and is_overdue_active:
             overdue_books_count += 1
@@ -167,6 +172,8 @@ def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
                 overdue_penalty=round(overdue_pen, 2),
                 damage_penalty=round(dmg_pen, 2),
                 penalty_amount=round(total_pen, 2),
+                penalty_payment_status=payment_st,
+                is_penalty_paid=bool(b.is_penalty_paid),
             )
         )
 
@@ -175,5 +182,6 @@ def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
     base.unpaid_overdue_total = round(unpaid_overdue_total, 2)
     base.unpaid_damage_loss_total = round(unpaid_damage_loss_total, 2)
     base.unpaid_penalty_total = round(unpaid_penalty_total, 2)
+    base.pending_penalty_approval_count = pending_penalty_approval_count
     base.alert_items = alert_items
     return base

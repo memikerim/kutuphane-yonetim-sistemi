@@ -147,6 +147,8 @@ export const api = {
     request(`/borrowings/${id}/cancel-request`, { method: 'POST' }),
   payPenalty: (id) =>
     request(`/borrowings/${id}/pay-penalty`, { method: 'POST' }),
+  approvePenaltyPayment: (id) =>
+    request(`/admin/borrowings/${id}/approve-payment`, { method: 'POST' }),
 
   // Admin Borrowings, Approval Queue, Stock Movements & Overdue Simulation
   getAdminBorrowings: () => request('/admin/borrowings'),

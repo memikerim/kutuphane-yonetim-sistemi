@@ -33,6 +33,8 @@ class UnpaidPenaltyItem(BaseModel):
     overdue_days: int = Field(..., description="Geciken gün sayısı")
     penalty_amount: float = Field(..., description="Hesaplanan / tahakkuk eden ceza tutarı (TL)")
     is_penalty_paid: bool = Field(False, description="Ceza ödendi mi?")
+    penalty_payment_status: str = Field("UNPAID", description="Ödeme onay durumu: UNPAID, PENDING_APPROVAL, PAID")
+    penalty_paid_at: datetime | None = Field(None, description="Kullanıcının ödeme yaptığı veya tahsilat tarihi")
 
     model_config = ConfigDict(from_attributes=True)
 

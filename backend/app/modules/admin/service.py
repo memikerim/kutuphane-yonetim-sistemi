@@ -71,6 +71,8 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                         overdue_days=max(0, overdue_days),
                         penalty_amount=penalty,
                         is_penalty_paid=False,
+                        penalty_payment_status=getattr(b, "penalty_payment_status", "UNPAID"),
+                        penalty_paid_at=getattr(b, "penalty_paid_at", None),
                     )
                 )
         else:
@@ -110,6 +112,8 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                         overdue_days=overdue_days,
                         penalty_amount=penalty,
                         is_penalty_paid=False,
+                        penalty_payment_status=getattr(b, "penalty_payment_status", "UNPAID"),
+                        penalty_paid_at=getattr(b, "penalty_paid_at", None),
                     )
                 )
 
@@ -238,4 +242,29 @@ def unban_user(
         admin_user.email,
     )
     return _build_admin_user_item(db, target)
+
+
+def approve_penalty_payment(
+    db: Session,
+    admin_user: User,
+    borrowing_id: uuid.UUID,
+) -> Borrowing:
+    """Yöneticinin kullanıcının yaptığı ceza/tazminat ödemesini onaylayıp borcu resmi olarak kapatmasını sağlar."""
+    borrowing = db.get(Borrowing, borrowing_id)
+    if not borrowing:
+        raise NotFoundError("Ödünç alma kaydı bulunamadı")
+
+    borrowing.penalty_payment_status = "PAID"
+    borrowing.is_penalty_paid = True
+    borrowing.penalty_paid_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(borrowing)
+    logger.info(
+        "Yönetici (%s) ceza/tazminat ödemesini onayladı ve borcu kapattı -> borrow_id: %s, user_id: %s, amount: %.2f TL",
+        admin_user.email,
+        borrowing.id,
+        borrowing.user_id,
+        borrowing.penalty_amount,
+    )
+    return borrowing
 

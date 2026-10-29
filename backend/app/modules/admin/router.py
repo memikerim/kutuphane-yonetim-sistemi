@@ -269,5 +269,21 @@ def unban_user_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
 
+@router.post(
+    "/borrowings/{borrowing_id}/approve-payment",
+    response_model=BorrowingRead,
+    summary="Kullanıcının ceza/tazminat ödemesini onayla ve borcu kapat (yalnızca ADMIN)",
+)
+def approve_penalty_payment_endpoint(
+    borrowing_id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+):
+    try:
+        return admin_service.approve_penalty_payment(db, admin, borrowing_id)
+    except borrowing_service.NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
 
 

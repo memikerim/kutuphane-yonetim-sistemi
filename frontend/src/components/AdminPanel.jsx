@@ -374,24 +374,35 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
     }
   };
 
-  // Elden Ceza Tahsilatı (Admin yetkisiyle borç kapatma)
+  // Ceza Tahsilatı & Kullanıcı Ödemesini Onaylama (Admin yetkisiyle borç kapatma)
   const handleCollectPenalty = async (item) => {
     const amountStr = Number(item.penalty_amount || 0).toFixed(2);
-    if (
-      !window.confirm(
-        `"${item.user_full_name}" adlı kullanıcının ${amountStr} TL tutarındaki gecikme cezası elden tahsil edildi olarak işaretlenecek ve borç kapatılacaktır.\n\nOnaylıyor musunuz?`
-      )
-    ) {
+    const isPendingUserPayment = item.penalty_payment_status === 'PENDING_APPROVAL';
+
+    const confirmMsg = isPendingUserPayment
+      ? `"${item.user_full_name}" adlı kullanıcının yapmış olduğu ${amountStr} TL tutarındaki ceza/tazminat ödemesini onaylayarak borcunu kapatmak istiyor musunuz?\n\nÖdeme onaylandığında kullanıcının yeni kitap ödünç alma ve rezervasyon yapma engeli kalkacaktır.`
+      : `"${item.user_full_name}" adlı kullanıcının ${amountStr} TL tutarındaki gecikme/tazminat cezası elden tahsil edildi olarak işaretlenecek ve borç kapatılacaktır.\n\nOnaylıyor musunuz?`;
+
+    if (!window.confirm(confirmMsg)) {
       return;
     }
 
-    setCollectingId(item.borrowing_id);
+    const borrowingId = item.borrowing_id || item.id;
+    setCollectingId(borrowingId);
     try {
-      await api.payPenalty(item.borrowing_id);
-      notify(
-        `"${item.user_full_name}" kullanıcısının ${amountStr} TL cezası başarıyla tahsil edildi ve borç kapatıldı!`,
-        'success'
-      );
+      if (isPendingUserPayment) {
+        await api.approvePenaltyPayment(borrowingId);
+        notify(
+          `"${item.user_full_name}" kullanıcısının ${amountStr} TL ödemesi onaylandı ve borç resmi olarak kapatıldı! Kullanıcının yeni ödünç ve rezervasyon hakkı açıldı.`,
+          'success'
+        );
+      } else {
+        await api.payPenalty(borrowingId);
+        notify(
+          `"${item.user_full_name}" kullanıcısının ${amountStr} TL cezası tahsil edildi ve borç kapatıldı!`,
+          'success'
+        );
+      }
       await loadAllCatalogData();
       if (subTab === 'logs') {
         await loadSystemLogs();
@@ -868,6 +879,8 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
   );
 
   const filteredPenalties = (unpaidPenalties?.items || []).filter((item) => {
+    if (penaltyStatusFilter === 'PENDING_APPROVAL')
+      return item.penalty_payment_status === 'PENDING_APPROVAL';
     if (penaltyStatusFilter === 'OVERDUE') return item.status === 'OVERDUE';
     if (penaltyStatusFilter === 'RETURNED') return item.status === 'RETURNED';
     return true;
@@ -1345,6 +1358,18 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                 }`}
               >
                 Tümü ({(unpaidPenalties?.items || []).length})
+              </button>
+              <button
+                onClick={() => setPenaltyStatusFilter('PENDING_APPROVAL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  penaltyStatusFilter === 'PENDING_APPROVAL'
+                    ? 'bg-purple-600 text-white shadow-2xs'
+                    : 'text-purple-800 hover:text-purple-950 font-extrabold'
+                }`}
+              >
+                Onay Bekleyen Ödemeler (
+                {(unpaidPenalties?.items || []).filter((i) => i.penalty_payment_status === 'PENDING_APPROVAL').length}
+                )
               </button>
               <button
                 onClick={() => setPenaltyStatusFilter('OVERDUE')}
@@ -1893,17 +1918,31 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                                 className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${
                                   item.is_penalty_paid
                                     ? 'bg-emerald-100 text-emerald-800'
+                                    : item.penalty_payment_status === 'PENDING_APPROVAL'
+                                    ? 'bg-purple-100 text-purple-900 border border-purple-300 animate-pulse'
                                     : isReturned
                                     ? 'bg-rose-100 text-rose-800'
                                     : 'bg-amber-100 text-amber-800'
                                 }`}
                               >
                                 {item.is_penalty_paid
-                                  ? 'Ödendi'
+                                  ? 'Ödendi (Onaylandı)'
+                                  : item.penalty_payment_status === 'PENDING_APPROVAL'
+                                  ? 'Ödeme Onayı Bekliyor'
                                   : isReturned
                                   ? 'Ödenmedi'
                                   : 'Birikiyor (Aktif)'}
                               </span>
+                              {item.penalty_payment_status === 'PENDING_APPROVAL' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCollectPenalty(item)}
+                                  className="block mt-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-purple-600 hover:bg-purple-700 text-white shadow-2xs cursor-pointer"
+                                  title="Kullanıcının ödemesini onayla"
+                                >
+                                  Ödemeyi Onayla
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <span className="text-xs text-slate-400">0.00 TL</span>
@@ -2192,7 +2231,17 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                           )}
                         </td>
                         <td className="py-3.5 px-4">
-                          {isReturned ? (
+                          {item.penalty_payment_status === 'PENDING_APPROVAL' ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-purple-100 text-purple-900 border border-purple-300 animate-pulse">
+                                <Clock className="w-3.5 h-3.5 text-purple-700" />
+                                Ödeme Onayı Bekliyor (Kullanıcı Ödedi)
+                              </span>
+                              <div className="text-[11px] text-purple-800 font-semibold">
+                                Kullanıcı ödeme yaptı, onaylamanızı bekliyor
+                              </div>
+                            </div>
+                          ) : isReturned ? (
                             <div className="space-y-1">
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
                                 <Clock className="w-3 h-3 text-amber-700" />
@@ -2218,19 +2267,39 @@ export default function AdminPanel({ notify, onCatalogChanged, onSelectBook }) {
                           <div className="text-base font-extrabold text-rose-700">
                             {penalty.toFixed(2)} TL
                           </div>
-                          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800">
-                            Tahsil Edilmedi
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              item.penalty_payment_status === 'PENDING_APPROVAL'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {item.penalty_payment_status === 'PENDING_APPROVAL'
+                              ? 'Onay Bekliyor'
+                              : 'Tahsil Edilmedi'}
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <button
                             onClick={() => handleCollectPenalty(item)}
                             disabled={isCollecting}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
-                            title="Elden ödeme alındığında borcu kapat"
+                            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer disabled:opacity-60 ${
+                              item.penalty_payment_status === 'PENDING_APPROVAL'
+                                ? 'bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-200'
+                                : 'bg-emerald-600 hover:bg-emerald-700'
+                            }`}
+                            title={
+                              item.penalty_payment_status === 'PENDING_APPROVAL'
+                                ? 'Kullanıcının ödemesini onayla ve kısıtlamayı kaldır'
+                                : 'Elden ödeme alındığında borcu kapat'
+                            }
                           >
                             <Check className={`w-4 h-4 ${isCollecting ? 'animate-spin' : ''}`} />
-                            {isCollecting ? 'Tahsil Ediliyor...' : 'Tahsil Et / Borcu Kapat'}
+                            {isCollecting
+                              ? 'İşleniyor...'
+                              : item.penalty_payment_status === 'PENDING_APPROVAL'
+                              ? 'Ödemeyi Onayla & Borcu Kapat'
+                              : 'Tahsil Et / Borcu Kapat'}
                           </button>
                         </td>
                       </tr>

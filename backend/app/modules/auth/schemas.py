@@ -78,6 +78,8 @@ class UserAlertItem(BaseModel):
     overdue_penalty: float = 0.0
     damage_penalty: float = 0.0
     penalty_amount: float = 0.0
+    penalty_payment_status: str = "UNPAID"
+    is_penalty_paid: bool = False
 
 
 class UserRead(BaseModel):
@@ -96,6 +98,7 @@ class UserRead(BaseModel):
     unpaid_overdue_total: float = 0.0
     unpaid_damage_loss_total: float = 0.0
     unpaid_penalty_total: float = 0.0
+    pending_penalty_approval_count: int = 0
     alert_items: list[UserAlertItem] = Field(default_factory=list)
 
     @field_validator("roles", mode="before")

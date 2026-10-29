@@ -50,6 +50,7 @@ async def lifespan(_app: FastAPI):
                 conn.execute(text("SELECT 1 FROM books LIMIT 1"))
                 try:
                     conn.execute(text("SELECT approval_status FROM borrowings LIMIT 1"))
+                    conn.execute(text("SELECT penalty_payment_status FROM borrowings LIMIT 1"))
                     conn.execute(text("SELECT 1 FROM stock_movements LIMIT 1"))
                     conn.execute(text("SELECT is_banned FROM users LIMIT 1"))
                 except Exception:
@@ -92,6 +93,21 @@ async def lifespan(_app: FastAPI):
                     conn.execute(
                         text(
                             "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_payment_status VARCHAR(30) DEFAULT 'UNPAID' NOT NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_paid_at TIMESTAMP WITH TIME ZONE"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'"
                         )
                     )
                     conn.execute(

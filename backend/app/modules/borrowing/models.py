@@ -64,6 +64,12 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     is_penalty_paid: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    penalty_payment_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="UNPAID", server_default="UNPAID"
+    )
+    penalty_paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     approval_status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="APPROVED", server_default="APPROVED"
     )

@@ -134,6 +134,13 @@ export default function BookDetailModal({
       );
       return;
     }
+    if ((user.pending_penalty_approval_count || 0) > 0) {
+      notify(
+        'Ödemiş olduğunuz gecikme veya kayıp/hasar tazminat bedelinin yönetici tarafından onaylanması beklenmektedir. Yönetici onaylayana kadar yeni kitap ödünç alamazsınız.',
+        'error'
+      );
+      return;
+    }
     if ((user.overdue_books_count || 0) > 0 || (user.unpaid_penalty_total || 0) > 0) {
       notify(
         'Gecikmiş kitabınızı iade edene ve gecikme veya kayıp/hasar tazminat borçlarınızı ödeyene kadar yeni kitap ödünç alamazsınız.',
@@ -157,6 +164,13 @@ export default function BookDetailModal({
         `Hesabınız yönetici tarafından kısıtlanmıştır: ${
           user.ban_reason || 'Yeni rezervasyon yapamazsınız.'
         }`,
+        'error'
+      );
+      return;
+    }
+    if ((user.pending_penalty_approval_count || 0) > 0) {
+      notify(
+        'Ödemiş olduğunuz gecikme veya kayıp/hasar tazminat bedelinin yönetici tarafından onaylanması beklenmektedir. Yönetici onaylayana kadar yeni rezervasyon yapamazsınız.',
         'error'
       );
       return;
@@ -504,6 +518,16 @@ export default function BookDetailModal({
                       <p className="mt-0.5 text-rose-800">
                         {user.ban_reason ||
                           'Kitap iadeniz ve borç ödemeleriniz tamamlanana kadar yeni ödünç alma, rezervasyon ve yorum işlemleri kapalıdır.'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (user?.pending_penalty_approval_count || 0) > 0 ? (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-300 text-amber-950 text-xs flex items-start gap-2">
+                    <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Ödeme Onayı Bekleniyor:</p>
+                      <p className="mt-0.5 text-amber-800">
+                        Ödemiş olduğunuz gecikme veya kayıp/hasar tazminat bedelinin yönetici tarafından onaylanması beklenmektedir ({user.pending_penalty_approval_count} işlem). Yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alamaz veya rezervasyon oluşturamazsınız.
                       </p>
                     </div>
                   </div>

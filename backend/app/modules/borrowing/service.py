@@ -92,6 +92,7 @@ def _check_user_overdue_or_unpaid_penalty(db: Session, user: User) -> None:
     )
     for b in user_borrowings:
         cond = (b.return_condition or "GOOD").upper()
+        payment_status = getattr(b, "penalty_payment_status", "UNPAID")
         is_overdue_active = (
             b.status != BorrowingStatus.RETURNED
             and b.approval_status != "PENDING_BORROW"
@@ -104,6 +105,19 @@ def _check_user_overdue_or_unpaid_penalty(db: Session, user: User) -> None:
             ((b.penalty_amount or 0.0) > 0 or (b.damage_penalty or 0.0) > 0)
             and not b.is_penalty_paid
         )
+
+        # Kullanıcı ödeme yapmış ama yönetici henüz onaylamamışsa (PENDING_APPROVAL)
+        if payment_status == "PENDING_APPROVAL":
+            logger.warning(
+                "İşlem engellendi (Ödeme yönetici onayı bekliyor) -> user_id: %s, borrow_id: %s, penalty: %.2f",
+                user.id,
+                b.id,
+                b.penalty_amount or 0.0,
+            )
+            raise BusinessRuleError(
+                "Ödemiş olduğunuz gecikme veya kayıp/hasar tazminat bedelinin yönetici tarafından onaylanması beklenmektedir. "
+                "Yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alamaz veya rezervasyon oluşturamazsınız."
+            )
 
         if is_overdue_active or is_damaged_or_lost_pending or has_unpaid_penalty:
             logger.warning(
@@ -784,19 +798,39 @@ def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> B
         else:
             raise BusinessRuleError("Bu kayıt için ödenecek bir gecikme cezası bulunmamaktadır")
 
-    if borrowing.is_penalty_paid:
-        raise BusinessRuleError("Bu gecikme cezası zaten ödenmiş")
+    if borrowing.is_penalty_paid and getattr(borrowing, "penalty_payment_status", "UNPAID") == "PAID":
+        raise BusinessRuleError("Bu gecikme cezası zaten yönetici tarafından onaylanmış ve kapatılmıştır")
 
-    borrowing.is_penalty_paid = True
+    now = datetime.now(timezone.utc)
+    if is_admin:
+        borrowing.penalty_payment_status = "PAID"
+        borrowing.is_penalty_paid = True
+        borrowing.penalty_paid_at = now
+        logger.info(
+            "Gecikme cezası Yönetici tarafından tahsil edildi / onaylandı -> borrow_id: %s, user_id: %s, penalty_amount: %.2f TL, is_admin: %s",
+            borrowing.id,
+            borrowing.user_id,
+            borrowing.penalty_amount,
+            is_admin,
+        )
+    else:
+        if getattr(borrowing, "penalty_payment_status", "UNPAID") == "PENDING_APPROVAL":
+            raise BusinessRuleError(
+                "Bu ceza için ödeme bildiriminiz zaten yapılmış olup yönetici onayı beklenmektedir. "
+                "Yönetici onaylayana kadar lütfen bekleyiniz."
+            )
+        borrowing.penalty_payment_status = "PENDING_APPROVAL"
+        borrowing.is_penalty_paid = False
+        borrowing.penalty_paid_at = now
+        logger.info(
+            "Kullanıcı ceza ödemesini gerçekleştirdi (Yönetici onayı bekleniyor) -> borrow_id: %s, user_id: %s, penalty_amount: %.2f TL",
+            borrowing.id,
+            borrowing.user_id,
+            borrowing.penalty_amount,
+        )
+
     db.commit()
     db.refresh(borrowing)
-    logger.info(
-        "Gecikme cezası başarıyla tahsil edildi / ödendi -> borrow_id: %s, user_id: %s, penalty_amount: %.2f TL, is_admin: %s",
-        borrowing.id,
-        borrowing.user_id,
-        borrowing.penalty_amount,
-        is_admin,
-    )
     return borrowing
 
 

@@ -2,6 +2,7 @@ import uuid
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.modules.auth.models import Role, RoleName, User
 from app.modules.borrowing import service
@@ -373,9 +374,28 @@ def test_overdue_or_unpaid_penalty_blocks_new_borrowing_and_reservation(db_sessi
         )
     assert "ödenmemiş gecikme cezanız" in str(exc_unpaid.value).lower()
 
-    # 3. Ceza ödendiğinde blokaj kalkmalı
+    # 3. Ceza ödendiğinde (PENDING_APPROVAL) ve yönetici onayladığında (PAID) blokaj kalkmalı
+    from app.modules.admin import service as admin_service
+    admin_role = db_session.scalar(select(Role).where(Role.name == RoleName.ADMIN))
+    admin_user = User(
+        email="admin_approver@test.com",
+        password_hash="hashed",
+        first_name="Admin",
+        last_name="Approver",
+    )
+    if admin_role:
+        admin_user.roles.append(admin_role)
+    db_session.add(admin_user)
+    db_session.commit()
+
     paid = service.pay_borrowing_penalty(db_session, test_user, b1.id)
-    assert paid.is_penalty_paid is True
+    assert paid.penalty_payment_status == "PENDING_APPROVAL"
+    assert paid.is_penalty_paid is False
+
+    # Yönetici onaylar
+    approved = admin_service.approve_penalty_payment(db_session, admin_user, b1.id)
+    assert approved.penalty_payment_status == "PAID"
+    assert approved.is_penalty_paid is True
 
     b2 = service.create_borrowing(
         db_session,
@@ -647,9 +667,10 @@ def test_ban_user_and_lost_damaged_blocking_and_alerts(
     assert return_lost_mov.quantity_change == -1
     assert return_lost_mov.stock_before == return_lost_mov.stock_after + 1
 
-    # 4. Ceza ödendiğinde borç bloku kalkar; ancak Admin kullanıcıyı banlarsa (not düşerek)
+    # 4. Ceza ödendiğinde ve onaylandığında borç bloku kalkar; ancak Admin kullanıcıyı banlarsa (not düşerek)
     # ödünç alma, rezervasyon ve yorum yapma engellenir!
     service.pay_borrowing_penalty(db_session, test_user, borrow.id)
+    admin_service.approve_penalty_payment(db_session, admin_user, borrow.id)
 
     ban_note = "Kitap iadeniz yapılana kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır."
     banned_info = admin_service.ban_user(db_session, admin_user, test_user.id, ban_note)
@@ -693,6 +714,136 @@ def test_ban_user_and_lost_damaged_blocking_and_alerts(
         ),
     )
     assert new_borrow.id is not None
+
+
+def test_penalty_payment_requires_admin_approval_before_borrowing_or_reservation(
+    db_session, test_user, test_book
+):
+    from app.modules.admin import service as admin_service
+    from app.modules.auth import service as auth_service
+    from app.modules.borrowing.schemas import AdminApproveReturnRequest, BorrowingReturn
+    from app.modules.catalog.models import Book
+
+    admin_user = User(
+        email="admin_pen_test@kutuphane.com",
+        password_hash="hashed",
+        first_name="Admin",
+        last_name="Penalty",
+    )
+    admin_role = db_session.scalar(select(Role).where(Role.name == RoleName.ADMIN))
+    if admin_role:
+        admin_user.roles.append(admin_role)
+    db_session.add(admin_user)
+
+    book_to_borrow = Book(
+        title="Yeni Ödünç Kitabı",
+        isbn="9789750000888",
+        published_year=2024,
+        stock_count=3,
+    )
+    db_session.add(book_to_borrow)
+    db_session.commit()
+
+    # 1. Kullanıcı test_book'u ödünç alır ve HASARLI olarak iade talebine gönderir
+    borrow = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(
+            book_id=test_book.id,
+            due_date=date.today() + timedelta(days=7),
+        ),
+    )
+    service.return_borrowing(
+        db_session,
+        test_user,
+        borrow.id,
+        BorrowingReturn(request_approval=True, return_condition="DAMAGED"),
+    )
+
+    # 2. Kullanıcı borcu henüz ödememişken yeni kitap ödünç alamaz veya rezerve edemez
+    with pytest.raises(service.BusinessRuleError) as exc1:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(
+                book_id=book_to_borrow.id,
+                due_date=date.today() + timedelta(days=7),
+            ),
+        )
+    assert "hasar/kayıp" in str(exc1.value) or "gecikme cezanız" in str(exc1.value)
+
+    with pytest.raises(service.BusinessRuleError) as exc_res1:
+        service.create_reservation(
+            db_session,
+            test_user,
+            ReservationCreate(book_id=book_to_borrow.id),
+        )
+    assert "hasar/kayıp" in str(exc_res1.value) or "gecikme cezanız" in str(exc_res1.value)
+
+    # 3. Kullanıcı borcu öder -> Durum PENDING_APPROVAL olur, is_penalty_paid hala False'tur!
+    paid_borrow = service.pay_borrowing_penalty(db_session, test_user, borrow.id)
+    assert paid_borrow.penalty_payment_status == "PENDING_APPROVAL"
+    assert paid_borrow.is_penalty_paid is False
+
+    # Giriş uyarılarında da onay bekleyen ödeme sayısı görünür
+    user_alerts = auth_service.build_user_read_with_alerts(db_session, test_user)
+    assert user_alerts.pending_penalty_approval_count == 1
+
+    # 4. Kullanıcı ödemeyi yapmış olsa bile yönetici onaylayana kadar YENİ KİTAP ÖDÜNÇ ALAMAZ ve REZERVE EDEMEZ!
+    with pytest.raises(service.BusinessRuleError) as exc2:
+        service.create_borrowing(
+            db_session,
+            test_user,
+            BorrowingCreate(
+                book_id=book_to_borrow.id,
+                due_date=date.today() + timedelta(days=7),
+            ),
+        )
+    assert "yönetici tarafından onaylanması beklenmektedir" in str(exc2.value)
+
+    with pytest.raises(service.BusinessRuleError) as exc_res2:
+        service.create_reservation(
+            db_session,
+            test_user,
+            ReservationCreate(book_id=book_to_borrow.id),
+        )
+    assert "yönetici tarafından onaylanması beklenmektedir" in str(exc_res2.value)
+
+    # Kullanıcı tekrar ödemeye kalkışırsa uyarılır
+    with pytest.raises(service.BusinessRuleError) as exc_repay:
+        service.pay_borrowing_penalty(db_session, test_user, borrow.id)
+    assert "yönetici onayı beklenmektedir" in str(exc_repay.value)
+
+    # 5. Yönetici (Admin) hem iadeyi hem de ceza ödemesini onaylar
+    service.admin_approve_return(
+        db_session,
+        admin_user,
+        borrow.id,
+        AdminApproveReturnRequest(
+            return_condition="DAMAGED",
+            damage_penalty=100.0,
+            withdraw_from_stock=False,
+        ),
+    )
+    approved_borrow = admin_service.approve_penalty_payment(db_session, admin_user, borrow.id)
+    assert approved_borrow.penalty_payment_status == "PAID"
+    assert approved_borrow.is_penalty_paid is True
+
+    # Artık onay bekleyen ödeme kalmaz
+    cleared_alerts = auth_service.build_user_read_with_alerts(db_session, test_user)
+    assert cleared_alerts.pending_penalty_approval_count == 0
+
+    # 6. Yönetici onayladıktan sonra kullanıcı başarıyla ödünç alabilir ve rezervasyon yapabilir!
+    new_borrow = service.create_borrowing(
+        db_session,
+        test_user,
+        BorrowingCreate(
+            book_id=book_to_borrow.id,
+            due_date=date.today() + timedelta(days=7),
+        ),
+    )
+    assert new_borrow.id is not None
+
 
 
 

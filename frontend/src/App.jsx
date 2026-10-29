@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   Banknote,
+  Clock,
 } from 'lucide-react';
 import { api, getToken, setToken } from './api';
 import Navbar from './components/Navbar';
@@ -40,8 +41,9 @@ export default function App() {
     const hasBan = Boolean(me.is_banned);
     const hasOverdue = Number(me.overdue_books_count || 0) > 0;
     const hasUnpaidFee = Number(me.unpaid_penalty_total || 0) > 0;
+    const hasPendingPayment = Number(me.pending_penalty_approval_count || 0) > 0;
     const hasAlertItems = Array.isArray(me.alert_items) && me.alert_items.length > 0;
-    if (hasBan || hasOverdue || hasUnpaidFee || hasAlertItems) {
+    if (hasBan || hasOverdue || hasUnpaidFee || hasPendingPayment || hasAlertItems) {
       setAccountAlertOpen(true);
     }
   }, []);
@@ -239,7 +241,8 @@ export default function App() {
       {user &&
         (user.is_banned ||
           Number(user.overdue_books_count || 0) > 0 ||
-          Number(user.unpaid_penalty_total || 0) > 0) && (
+          Number(user.unpaid_penalty_total || 0) > 0 ||
+          Number(user.pending_penalty_approval_count || 0) > 0) && (
           <div className="bg-gradient-to-r from-rose-700 via-red-700 to-rose-800 text-white border-b border-rose-500">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2 font-semibold">
@@ -250,6 +253,8 @@ export default function App() {
                         user.ban_reason ||
                         'Kitap iadeniz ve borç ödemeniz yapılana kadar yeni ödünç, rezervasyon ve yorum işlemleriniz kapalıdır.'
                       }`
+                    : (user.pending_penalty_approval_count || 0) > 0
+                    ? 'Ödemiş olduğunuz gecikme veya kayıp/hasar tazminat bedelinin yönetici tarafından onaylanması beklenmektedir. Yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alamaz veya rezervasyon oluşturamazsınız.'
                     : `Hesabınızda ${
                         user.overdue_books_count > 0
                           ? `${user.overdue_books_count} adet gecikmiş kitap`
@@ -808,6 +813,8 @@ export default function App() {
                   <h2 className="text-lg sm:text-xl font-extrabold leading-snug">
                     {user.is_banned
                       ? 'Hesabınız Yönetici Tarafından Kısıtlanmıştır!'
+                      : (user.pending_penalty_approval_count || 0) > 0
+                      ? 'Ödeme Onayı Bekleniyor / Borç Bildirimi'
                       : 'Gecikmiş Kitap veya Ödenmemiş Borç Bildirimi'}
                   </h2>
                   <p className="text-xs text-rose-100 mt-1">
@@ -844,7 +851,20 @@ export default function App() {
                 </div>
               )}
 
-              {/* 2. Gecikmiş Kitap & Gecikme / Kayıp / Hasar Tahsilat Ücreti Kutusu */}
+              {/* 2. Yönetici Ödeme Onayı Bekleyen Cezalar Kutusu */}
+              {Number(user.pending_penalty_approval_count || 0) > 0 && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-400 space-y-2">
+                  <div className="flex items-center gap-2 text-amber-950 font-extrabold text-sm">
+                    <Clock className="w-5 h-5 text-amber-700 shrink-0" />
+                    <span>Ödeme Yönetici Onayında Bekliyor ({user.pending_penalty_approval_count} İşlem)</span>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-white border border-amber-200 text-xs sm:text-sm font-semibold text-amber-950 leading-relaxed">
+                    Ödemiş olduğunuz gecikme veya kayıp/hasar tazminat bedelinin yönetici tarafından onaylanması beklenmektedir. Yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alamaz veya rezervasyon oluşturamazsınız.
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Gecikmiş Kitap & Gecikme / Kayıp / Hasar Tahsilat Ücreti Kutusu */}
               {(Number(user.overdue_books_count || 0) > 0 ||
                 Number(user.unpaid_penalty_total || 0) > 0 ||
                 (user.alert_items && user.alert_items.length > 0)) && (
@@ -911,6 +931,11 @@ export default function App() {
                                 {item.return_condition === 'DAMAGED' && (
                                   <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-950 font-bold">
                                     Hasarlı Kitap Tazminatı
+                                  </span>
+                                )}
+                                {item.penalty_payment_status === 'PENDING_APPROVAL' && (
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-300 text-amber-950 font-extrabold border border-amber-400">
+                                    Ödeme Onayı Bekliyor
                                   </span>
                                 )}
                               </div>

@@ -182,10 +182,20 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
   };
 
   const handlePayPenalty = async (borrowingId, amount) => {
+    if (
+      !window.confirm(
+        `${amount} TL tutarındaki ceza/tazminat borcunu ödemek istiyor musunuz?\n\nNot: Ödemeniz görevli onayına iletilecek ve yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alma ve rezervasyon işlemleriniz kısıtlı kalacaktır.`
+      )
+    ) {
+      return;
+    }
     setPayingPenaltyId(borrowingId);
     try {
       await api.payPenalty(borrowingId);
-      notify(`${amount} TL cezanız başarıyla ödendi!`, 'success');
+      notify(
+        `${amount} TL tutarındaki ödemeniz iletildi! Yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alma ve rezervasyon işlemleriniz kapalı kalacaktır.`,
+        'info'
+      );
       await fetchAll();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
@@ -694,6 +704,8 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                             className={`rounded-xl p-3 border flex items-center justify-between gap-2 text-xs ${
                               item.is_penalty_paid
                                 ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                                : item.penalty_payment_status === 'PENDING_APPROVAL'
+                                ? 'bg-purple-50 border-purple-300 text-purple-950'
                                 : 'bg-amber-50 border-amber-300 text-amber-950'
                             }`}
                           >
@@ -705,9 +717,11 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                                   ? ` (${returnCond === 'LOST' ? 'Kayıp' : 'Hasar'} Tazminatı: ${damagePenalty.toFixed(0)} TL)`
                                   : ''}
                               </span>
-                              <span className="text-[11px] opacity-80">
+                              <span className="text-[11px] opacity-90">
                                 {item.is_penalty_paid
-                                  ? 'Bu ceza / tazminat ödenmiştir.'
+                                  ? 'Bu ceza / tazminat ödenmiş ve görevli tarafından onaylanmıştır.'
+                                  : item.penalty_payment_status === 'PENDING_APPROVAL'
+                                  ? 'Ödemeniz iletildi; yönetici ödemeyi aldığını onaylayana kadar yeni kitap ödünç alamaz ve rezerve edemezsiniz.'
                                   : 'Yeni ödünç/rezervasyon yapabilmek için bu borcu ödemelisiniz.'}
                               </span>
                             </div>
@@ -715,10 +729,16 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                               className={`px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${
                                 item.is_penalty_paid
                                   ? 'bg-emerald-200 text-emerald-900'
+                                  : item.penalty_payment_status === 'PENDING_APPROVAL'
+                                  ? 'bg-purple-200 text-purple-900 border border-purple-300 animate-pulse'
                                   : 'bg-rose-100 text-rose-800 border border-rose-300'
                               }`}
                             >
-                              {item.is_penalty_paid ? 'Ödendi' : 'Ödenmedi'}
+                              {item.is_penalty_paid
+                                ? 'Ödendi (Onaylandı)'
+                                : item.penalty_payment_status === 'PENDING_APPROVAL'
+                                ? 'Ödeme Onayı Bekliyor'
+                                : 'Ödenmedi'}
                             </span>
                           </div>
                         )}
@@ -743,8 +763,8 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                               disabled={returningId === item.id}
                               className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-semibold shadow-xs transition-all cursor-pointer disabled:opacity-60 ${
                                 isOverdue
-                                  ? 'bg-rose-600 hover:bg-rose-700'
-                                  : 'bg-indigo-600 hover:bg-indigo-700'
+                                   ? 'bg-rose-600 hover:bg-rose-700'
+                                   : 'bg-indigo-600 hover:bg-indigo-700'
                               }`}
                             >
                               <RotateCcw className="w-4 h-4" />
@@ -757,16 +777,26 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                           )}
 
                           {hasUnpaidPenalty && (
-                            <button
-                              onClick={() => handlePayPenalty(item.id, penaltyAmount)}
-                              disabled={payingPenaltyId === item.id}
-                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
-                            >
-                              <Banknote className="w-4 h-4" />
-                              {payingPenaltyId === item.id
-                                ? 'Ödeniyor...'
-                                : `Borcu Öde (${penaltyAmount.toFixed(2)} TL)`}
-                            </button>
+                            item.penalty_payment_status === 'PENDING_APPROVAL' ? (
+                              <button
+                                disabled
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-100 text-purple-900 border border-purple-300 text-xs font-bold shadow-xs cursor-not-allowed opacity-90"
+                              >
+                                <Clock className="w-4 h-4 text-purple-700 animate-pulse" />
+                                Ödeme Görevli Onayında Bekliyor
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handlePayPenalty(item.id, penaltyAmount)}
+                                disabled={payingPenaltyId === item.id}
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                              >
+                                <Banknote className="w-4 h-4" />
+                                {payingPenaltyId === item.id
+                                  ? 'Ödeniyor...'
+                                  : `Borcu Öde (${penaltyAmount.toFixed(2)} TL)`}
+                              </button>
+                            )
                           )}
                         </div>
                       )}
