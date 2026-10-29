@@ -1469,6 +1469,25 @@ def get_user_and_admin_notifications(
                 )
             )
 
+        # C6) Görevli Tarafından Reddedilen Ödünç Talebi (Kullanıcıya Reddetme Bildirimi)
+        if approval_st == "REJECTED":
+            reason = (
+                b.admin_notes
+                or "Kütüphane standartları veya stok durumu nedeniyle talep onaylanamadı."
+            )
+            items.append(
+                NotificationItem(
+                    id=f"user-borrow-rejected-{b.id}",
+                    target="USER",
+                    type="BORROW_REJECTED",
+                    severity="error",
+                    title="Ödünç Talebiniz Reddedildi",
+                    message=f"'{b_title}' için yaptığınız ödünç talebi görevli tarafından reddedildi. Red Gerekçesi: {reason}",
+                    action_type="VIEW_BORROW_STATUS",
+                    meta={"borrowing_id": str(b.id), "book_title": b_title, "reason": reason},
+                )
+            )
+
     user_action_count = len(items)
 
     # 2. YÖNETİCİ BİLDİRİMLERİ (Yalnızca Admin Kullanıcı İçin)

@@ -71,6 +71,8 @@ export default function NotificationCenter({
         return { label: 'Ödünç Talebi', bg: 'bg-blue-100 text-blue-800 border-blue-300' };
       case 'PENDING_RETURN':
         return { label: 'İade Kontrolü', bg: 'bg-amber-100 text-amber-800 border-amber-300' };
+      case 'BORROW_REJECTED':
+        return { label: 'Ödünç Reddedildi', bg: 'bg-rose-100 text-rose-900 border-rose-300 font-extrabold' };
       case 'BANNED':
         return { label: 'Hesap Kısıtlaması', bg: 'bg-rose-600 text-white border-rose-700' };
       case 'ADMIN_PENDING_PAYMENT':

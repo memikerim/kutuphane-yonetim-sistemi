@@ -259,7 +259,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
         notes: reserveNotes || 'Rezervasyon sırasından ödünç talep edildi',
       });
       notify(
-        `"${bookTitle}" için ödünç talebiniz başarıyla oluşturuldu ve görevli onay kuyruğuna iletildi!`,
+        `"${bookTitle}" için ödünç talebiniz görevli onayına iletildi. Talebiniz reddedilebileceğinden Bildirimler sekmesinden onay bildirimini görmeden lütfen kütüphaneye gelmeyiniz.`,
         'success'
       );
       setReserveBorrowModalItem(null);
@@ -680,14 +680,33 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         </div>
 
                         {/* Workflow Status Info Banners */}
+                        {isRejected && (
+                          <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-950 space-y-1">
+                            <span className="font-extrabold text-rose-900 flex items-center gap-1.5">
+                              <X className="w-4 h-4 text-rose-600 shrink-0 stroke-[2.5]" />
+                              Ödünç Talebiniz Görevli Tarafından Reddedildi
+                            </span>
+                            <p className="text-[11px] text-rose-900 leading-relaxed">
+                              <strong>Ret Gerekçesi / Görevli Notu:</strong>{' '}
+                              <span className="font-semibold italic text-rose-950">
+                                {item.admin_notes || 'Kütüphane standartları veya stok durumu gereği talep onaylanamadı.'}
+                              </span>
+                            </p>
+                          </div>
+                        )}
+
                         {isPendingBorrow && (
-                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">
-                            <span className="font-bold block">
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+                            <span className="font-bold flex items-center gap-1.5 text-amber-950">
+                              <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
                               Görevli (Kütüphaneci) Teslim Onayı Bekleniyor
                             </span>
-                            <span className="text-[11px] text-amber-800">
+                            <p className="text-[11px] text-amber-800">
                               Kitap stoğu sizin için ayrılmıştır (-1). Görevli onayladığında ödünç süreniz başlar. İsterseniz talebi iptal edebilirsiniz.
-                            </span>
+                            </p>
+                            <p className="text-[11px] font-bold text-amber-950">
+                              ⚠️ Bildirimler sekmesinden onay bildirimini görmeden lütfen kütüphaneye teslim almaya gelmeyiniz!
+                            </p>
                           </div>
                         )}
 
@@ -1266,6 +1285,20 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                   placeholder="Not ekleyebilirsiniz..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/60 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
+              </div>
+
+              {/* Önemli Uyarı: Görevli Onayı & Bildirim Uyarısı */}
+              <div className="p-3.5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-xs text-amber-950 space-y-1">
+                <div className="flex items-center gap-1.5 font-extrabold text-amber-900">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Önemli Uyarı: Bildirim Gelmeden Kütüphaneye Gelmeyiniz</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-900">
+                  Ödünç talebiniz görevli onayına sunulur. Yoğunluk veya kitap kondisyonu gerekçesiyle <strong>talebiniz reddedilebilir</strong>.
+                </p>
+                <p className="text-[11px] font-bold text-amber-950">
+                  ⚠️ Hesabınızdaki "Bildirimler" sekmesinden onay bildirimini görmeden lütfen kütüphaneye teslim almaya gelmeyiniz!
+                </p>
               </div>
 
               {/* Bilgilendirme Kutusu */}

@@ -30,6 +30,14 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 
+const REJECT_REASON_TEMPLATES = [
+  'Kitabın raftaki fiziksel durumu yıpranmış/hasarlı tespit edildi; onarım ve bakım için ayrıldı.',
+  'Kütüphane içi envanter sayımı ve düzenleme çalışması nedeniyle geçici olarak bu kitap ödünç verilememektedir.',
+  'Kullanıcının aktif ödünç kotası dolmuş veya iadesi geciken başka bir kitabı bulunmaktadır.',
+  'Talep edilen teslimat koşulları kütüphane standartlarımıza uygun değildir.',
+  'Kütüphanemiz şu an yoğunluk/teknik sebepler nedeniyle yeni fiziksel kitap teslimi yapamamaktadır.',
+];
+
 export default function AdminPanel({
   notify,
   onCatalogChanged,
@@ -75,6 +83,11 @@ export default function AdminPanel({
   const [inspectDamagePenalty, setInspectDamagePenalty] = useState(0);
   const [inspectWithdrawFromStock, setInspectWithdrawFromStock] = useState(false);
   const [inspectAdminNotes, setInspectAdminNotes] = useState('');
+
+  // Admin: Ödünç Reddetme Modalı State'leri
+  const [rejectModalItem, setRejectModalItem] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectSubmitting, setRejectSubmitting] = useState(false);
 
   // Stok Geçmişi & Hasar/Kayıp Raporları State'leri
   const [stockSummary, setStockSummary] = useState({
@@ -304,22 +317,35 @@ export default function AdminPanel({
     }
   };
 
-  // Admin: Ödünç Talebini Reddet (+1 Stok İade)
-  const handleRejectBorrow = async (item) => {
-    const reason = window.prompt(
-      `"${item.user_full_name}" kullanıcısının "${item.book_title}" ödünç talebini reddetme nedeninizi girin (Ayrılan +1 stok rafa geri eklenecektir):`,
-      'Stok kontrolü sonucu talep reddedildi'
-    );
-    if (reason === null) return;
+  // Admin: Ödünç Talebini Reddetme Modalını Aç
+  const openRejectBorrowModal = (item) => {
+    setRejectModalItem(item);
+    setRejectReason(REJECT_REASON_TEMPLATES[0]);
+  };
+
+  const handleConfirmRejectBorrowSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!rejectModalItem) return;
+
+    const item = rejectModalItem;
+    const finalReason =
+      rejectReason.trim() || 'Kütüphane standartları veya stok durumu gereği talep onaylanamadı.';
+
+    setRejectSubmitting(true);
     setProcessingWorkflowId(item.id);
     try {
-      await api.rejectBorrow(item.id, { admin_notes: reason || 'Görevli tarafından reddedildi' });
-      notify('Ödünç talebi reddedildi ve ayrılan stok (+1) rafa geri eklendi.', 'info');
+      await api.rejectBorrow(item.id, { admin_notes: finalReason });
+      notify(
+        `"${item.user_full_name}" kullanıcısının ödünç talebi reddedildi, +1 stok rafa eklendi ve gerekçe kullanıcıya bildirim olarak iletildi.`,
+        'info'
+      );
+      setRejectModalItem(null);
       await loadAllCatalogData();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
       notify(err.message || 'Ödünç talebi reddedilemedi', 'error');
     } finally {
+      setRejectSubmitting(false);
       setProcessingWorkflowId(null);
     }
   };
@@ -2007,7 +2033,7 @@ export default function AdminPanel({
                                 Ödüncü Onayla
                               </button>
                               <button
-                                onClick={() => handleRejectBorrow(item)}
+                                onClick={() => openRejectBorrowModal(item)}
                                 disabled={processingWorkflowId === item.id}
                                 className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 disabled:opacity-60 text-rose-700 border border-rose-200 text-xs font-bold transition-colors cursor-pointer"
                               >
@@ -3528,6 +3554,107 @@ export default function AdminPanel({
                 >
                   <ShieldAlert className="w-4 h-4" />
                   {banSubmitting ? 'Uygulanıyor...' : 'Kullanıcıyı Banla & Notu Kaydet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: Ödünç Talebini Reddetme Modalı (Web Sitesi İçi Pencere & Şablon Sebepler) */}
+      {rejectModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border-2 border-rose-300 w-full max-w-lg overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-rose-50 border-b border-rose-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center">
+                  <X className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-rose-950">
+                    Ödünç Talebini Reddet
+                  </h3>
+                  <p className="text-xs text-rose-700 font-medium">
+                    {rejectModalItem.user_full_name} ({rejectModalItem.user_email || 'Kullanıcı'}) — "{rejectModalItem.book_title}"
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRejectModalItem(null)}
+                className="p-1.5 rounded-lg text-rose-500 hover:text-rose-800 hover:bg-rose-100 cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRejectBorrowSubmit} className="p-6 space-y-4">
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  İşlem Hakkında Bilgilendirme
+                </p>
+                <p>
+                  • Bu işlem ödünç talebini iptal eder ve rezerve/tahsis edilen <strong>1 adet kitabı rafa (stok)</strong> geri kazandırır.
+                </p>
+                <p>
+                  • Belirttiğiniz ret gerekçesi kullanıcının <strong>Bildirimler</strong> sekmesine anlık olarak iletilir.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="block text-[11px] font-bold text-slate-700">
+                  Hızlı Şablon Cevaplar (Seçmek İçin Tıklayın):
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {REJECT_REASON_TEMPLATES.map((tpl, idx) => {
+                    const isSelected = rejectReason === tpl;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setRejectReason(tpl)}
+                        className={`text-left px-3 py-2 rounded-xl text-xs transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'bg-rose-100 border-rose-400 text-rose-950 font-semibold ring-1 ring-rose-400'
+                            : 'bg-slate-50 hover:bg-rose-50 border-slate-200 hover:border-rose-300 text-slate-700'
+                        }`}
+                      >
+                        "{tpl}"
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Kullanıcıya İletilecek Ret Gerekçesi / Yönetici Notu *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Gerekçeyi buraya yazın veya yukarıdaki hazır şablonlardan birini seçin..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-rose-300 bg-white text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setRejectModalItem(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={rejectSubmitting || !rejectReason.trim()}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <X className="w-4 h-4 stroke-[2.5]" />
+                  {rejectSubmitting ? 'İşleniyor...' : 'Talebi Reddet (+1 Stok) & Bildirim Gönder'}
                 </button>
               </div>
             </form>

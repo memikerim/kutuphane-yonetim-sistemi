@@ -207,7 +207,7 @@ export default function BookDetailModal({
         notes: borrowNotes.trim() || undefined,
       });
       notify(
-        `"${book.title}" için ödünç talebiniz oluşturuldu ve stok sizin için ayrıldı (-1). Görevli (Admin) onayından sonra teslim alabilirsiniz.`,
+        `"${book.title}" için ödünç talebiniz görevli onayına iletildi. Talebiniz reddedilebileceğinden Bildirimler sekmesinden onay bildirimini görmeden lütfen kütüphaneye gelmeyiniz.`,
         'success'
       );
       setConfirmMode(null);
@@ -725,6 +725,20 @@ export default function BookDetailModal({
                       >
                         <X className="w-4 h-4" />
                       </button>
+                    </div>
+
+                    {/* Önemli Uyarı: Görevli Onayı & Bildirim Uyarısı */}
+                    <div className="p-3 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-extrabold text-amber-900">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Önemli Uyarı: Bildirim Gelmeden Kütüphaneye Gelmeyiniz</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-amber-900">
+                        Ödünç talebiniz kütüphane görevlisinin incelemesine sunulur. Yoğunluk, kitap kondisyonu veya envanter durumu gereği <strong>talebiniz reddedilebilir</strong>.
+                      </p>
+                      <p className="text-[11px] font-bold text-amber-950">
+                        ⚠️ Hesabınızdaki "Bildirimler" sekmesinden onay bildirimini görmeden lütfen kütüphaneye teslim almaya gelmeyiniz!
+                      </p>
                     </div>
 
                     <div className="bg-white/90 rounded-xl p-3 border border-indigo-200 text-xs text-slate-700 space-y-1.5">
