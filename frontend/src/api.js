@@ -72,6 +72,12 @@ async function request(path, options = {}) {
           })
           .join(' | ');
       }
+    } else if (response.status === 401) {
+      errorMessage = 'E-posta veya şifre hatalı.';
+    } else if (response.status === 403) {
+      errorMessage = 'Bu işlem için yetkiniz bulunmamaktadır.';
+    } else if (response.status === 500) {
+      errorMessage = 'Sunucu tarafında geçici bir hata oluştu (HTTP 500). Lütfen tekrar deneyin.';
     }
     const error = new Error(errorMessage);
     error.status = response.status;

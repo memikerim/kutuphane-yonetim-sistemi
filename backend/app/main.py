@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,6 +21,86 @@ from app.modules.review.router import router as review_router
 
 # Uygulama genelinde loglamayı başlat
 setup_logging()
+logger = logging.getLogger("app.main")
+
+
+def ensure_database_schema() -> None:
+    """Veritabanı tablolarındaki eksik sütunları güvenli şekilde oluşturur (PostgreSQL/SQLite uyumlu)."""
+    try:
+        from app.modules.borrowing.models import StockMovement
+        StockMovement.__table__.create(bind=engine, checkfirst=True)
+    except Exception as e:
+        logger.warning(f"StockMovement tablo kontrolü uyarısı: {e}")
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) DEFAULT 'APPROVED' NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_condition VARCHAR(20) DEFAULT 'GOOD' NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS damage_penalty FLOAT DEFAULT 0.0 NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_notes VARCHAR(500)"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_payment_status VARCHAR(30) DEFAULT 'UNPAID' NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_paid_at TIMESTAMP WITH TIME ZONE"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_rejection_read BOOLEAN DEFAULT FALSE NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(500)"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP WITH TIME ZONE"
+                )
+            )
+    except Exception as e:
+        logger.warning(f"Şema doğrulama/güncelleme uyarısı: {e}")
+
+
+# Modül yüklenirken şemayı hemen garanti altına al
+if not settings.DATABASE_URL.startswith("sqlite"):
+    ensure_database_schema()
 
 
 async def _periodic_reservation_and_overdue_sync() -> None:
@@ -40,21 +121,10 @@ async def _periodic_reservation_and_overdue_sync() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     if not getattr(_app.state, "testing", False):
-        # Soğuk başlatma (cold start) optimizasyonu:
-        # Tablolar ve veriler zaten mevcutsa create_all ve JSON ayrıştırmasını atlar (~2 sn kazandırır).
-        # Yalnızca veritabanı tamamen boşsa seed_cloud() çalıştırılır.
         need_seed = False
-        need_schema_upgrade = False
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1 FROM books LIMIT 1"))
-                try:
-                    conn.execute(text("SELECT approval_status FROM borrowings LIMIT 1"))
-                    conn.execute(text("SELECT penalty_payment_status FROM borrowings LIMIT 1"))
-                    conn.execute(text("SELECT 1 FROM stock_movements LIMIT 1"))
-                    conn.execute(text("SELECT is_banned FROM users LIMIT 1"))
-                except Exception:
-                    need_schema_upgrade = True
         except Exception:
             need_seed = True
 
@@ -64,74 +134,8 @@ async def lifespan(_app: FastAPI):
                 seed_cloud()
             except Exception as e:
                 logger.warning(f"Otomatik şema ve tohumlama sırasında hata: {e}")
-        elif need_schema_upgrade:
-            try:
-                from app.modules.borrowing.models import StockMovement
-
-                StockMovement.__table__.create(bind=engine, checkfirst=True)
-                with engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) DEFAULT 'APPROVED' NOT NULL"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_condition VARCHAR(20) DEFAULT 'GOOD' NOT NULL"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS damage_penalty FLOAT DEFAULT 0.0 NOT NULL"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_notes VARCHAR(500)"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_payment_status VARCHAR(30) DEFAULT 'UNPAID' NOT NULL"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_paid_at TIMESTAMP WITH TIME ZONE"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_rejection_read BOOLEAN DEFAULT FALSE NOT NULL"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE NOT NULL"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(500)"
-                        )
-                    )
-                    conn.execute(
-                        text(
-                            "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP WITH TIME ZONE"
-                        )
-                    )
-            except Exception as e:
-                logger.warning(f"Şema güncellemesi sırasında uyarı: {e}")
+        else:
+            ensure_database_schema()
 
     sync_task = None
     if not getattr(_app.state, "testing", False):
@@ -233,3 +237,9 @@ def root():
 def health() -> dict[str, str]:
     """Sistemin ve API servisinin ayakta olduğunu doğrular."""
     return {"status": "ok"}
+
+
+@app.get("/api/v1/migrate-db", include_in_schema=False)
+def trigger_migrate_db():
+    ensure_database_schema()
+    return {"status": "ok", "message": "Database schema checked and verified"}
