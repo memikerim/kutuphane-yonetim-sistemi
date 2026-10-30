@@ -212,12 +212,14 @@ class Book(UUIDPrimaryKeyMixin, Base):
                         st_label = "Ödünç Verildi"
 
                     b_name = getattr(borrowing, "user_full_name", None)
+                    b_uid = getattr(borrowing, "user_id", None)
                     b_due = getattr(borrowing, "due_date", None)
                     b_id = getattr(borrowing, "id", None)
                 else:
                     st = "AVAILABLE"
                     st_label = "Rafta (Müsait)"
                     b_name = None
+                    b_uid = None
                     b_due = None
                     b_id = None
 
@@ -229,6 +231,7 @@ class Book(UUIDPrimaryKeyMixin, Base):
                         "status": st,
                         "status_label": st_label,
                         "borrower_name": b_name,
+                        "borrower_id": b_uid,
                         "due_date": b_due,
                         "borrowing_id": b_id,
                     }

@@ -60,6 +60,7 @@ class BookCopyInfo(BaseModel):
     status: str
     status_label: str
     borrower_name: str | None = None
+    borrower_id: uuid.UUID | None = None
     due_date: date | None = None
     borrowing_id: uuid.UUID | None = None
 

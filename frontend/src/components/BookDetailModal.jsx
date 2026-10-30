@@ -1067,9 +1067,21 @@ export default function BookDetailModal({
                                 )}
                               </td>
                               <td className="py-3 px-4 text-right text-slate-600">
-                                {copy.borrower_name ? (
+                                {copy.borrower_name || !isAvailable ? (
                                   <div>
-                                    <span className="font-semibold text-slate-900 block">{copy.borrower_name}</span>
+                                    <span className="font-semibold text-slate-900 block text-xs">
+                                      {isAdmin ? (
+                                        copy.borrower_name || 'Ödünç Verildi'
+                                      ) : user && copy.borrower_id && copy.borrower_id === user.id ? (
+                                        <span className="text-emerald-700 font-bold">
+                                          Sizde (Zimmetinizde)
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-600 font-medium">
+                                          Bir okuyucuda teslimde
+                                        </span>
+                                      )}
+                                    </span>
                                     {copy.due_date && (
                                       <span className="text-[11px] text-slate-500">
                                         Son Teslim: {copy.due_date}
