@@ -27,6 +27,9 @@ import {
   History,
   FileWarning,
   ShieldAlert,
+  Bookmark,
+  Barcode,
+  Hash,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -76,6 +79,12 @@ export default function AdminPanel({
       }
     }
   }, [initialSubTab, initialFilter]);
+
+  // Admin: Ödünç Teslim Onay Modalı (Demirbaş Kodunu Doğrulama & Seçme)
+  const [deliverModalItem, setDeliverModalItem] = useState(null);
+  const [deliverCopyCode, setDeliverCopyCode] = useState('');
+  const [deliverAdminNotes, setDeliverAdminNotes] = useState('');
+  const [deliverSubmitting, setDeliverSubmitting] = useState(false);
 
   // Admin İade Fiziksel Kontrol & Onay Modalı State'leri
   const [inspectModalItem, setInspectModalItem] = useState(null);
@@ -297,22 +306,38 @@ export default function AdminPanel({
     }
   };
 
-  // Admin: Ödünç Talebini Onayla (Teslim Et)
-  const handleApproveBorrow = async (item) => {
-    setProcessingWorkflowId(item.id);
+  // Admin: Ödünç Talebini Onayla (Teslim Et) Modalını Aç
+  const openDeliverBorrowModal = (item) => {
+    setDeliverModalItem(item);
+    const assignedCode =
+      item.copy_code ||
+      (item.book_isbn ? `DEM-${item.book_isbn.replace(/\D/g, '')}-K1` : 'DEM-K1');
+    setDeliverCopyCode(assignedCode);
+    setDeliverAdminNotes('Görevli tarafından kütüphane danışmasında fiziksel teslim onaylandı.');
+  };
+
+  const handleConfirmDeliverBorrowSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!deliverModalItem) return;
+
+    setDeliverSubmitting(true);
+    setProcessingWorkflowId(deliverModalItem.id);
     try {
-      await api.approveBorrow(item.id, {
-        admin_notes: 'Görevli tarafından fiziksel teslim onaylandı.',
+      await api.approveBorrow(deliverModalItem.id, {
+        copy_code: deliverCopyCode.trim() || undefined,
+        admin_notes: deliverAdminNotes.trim() || 'Görevli tarafından fiziksel teslim onaylandı.',
       });
       notify(
-        `"${item.user_full_name}" kullanıcısına "${item.book_title}" kitabının ödünç teslimi onaylandı!`,
+        `"${deliverModalItem.user_full_name}" kullanıcısına "${deliverModalItem.book_title}" kitabı (Nüsha: ${deliverCopyCode}) teslim edildi ve 14 günlük süre başlatıldı!`,
         'success'
       );
+      setDeliverModalItem(null);
       await loadAllCatalogData();
       if (onCatalogChanged) onCatalogChanged();
     } catch (err) {
-      notify(err.message || 'Ödünç onaylanamadı', 'error');
+      notify(err.message || 'Ödünç teslimi onaylanamadı', 'error');
     } finally {
+      setDeliverSubmitting(false);
       setProcessingWorkflowId(null);
     }
   };
@@ -1883,6 +1908,19 @@ export default function AdminPanel({
                               books.find((b) => b.id === item.book_id)?.title ||
                               item.book_id}
                           </div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            {(item.copy_code || item.book_isbn) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                <Bookmark className="w-3 h-3 text-indigo-500" />
+                                {item.copy_code || `DEM-${(item.book_isbn || '').replace(/\D/g, '')}-K1`}
+                              </span>
+                            )}
+                            {(item.call_number || books.find((b) => b.id === item.book_id)?.call_number) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                {item.call_number || books.find((b) => b.id === item.book_id)?.call_number}
+                              </span>
+                            )}
+                          </div>
                           {(item.return_notes || item.admin_notes) && (
                             <div className="text-[11px] text-slate-500 mt-1 space-y-0.5 max-w-xs">
                               {item.return_notes && (
@@ -2025,7 +2063,7 @@ export default function AdminPanel({
                           {isPendingBorrow ? (
                             <div className="inline-flex items-center gap-1.5">
                               <button
-                                onClick={() => handleApproveBorrow(item)}
+                                onClick={() => openDeliverBorrowModal(item)}
                                 disabled={processingWorkflowId === item.id}
                                 className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
                               >
@@ -3187,6 +3225,37 @@ export default function AdminPanel({
             </div>
 
             <form onSubmit={handleApproveReturnSubmit} className="p-6 space-y-4">
+              {/* Teslim Alınan Nüsha ve Barkod Bilgisi */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">
+                  Teslim Alınan Nüsha & Kütüphane Bilgileri
+                </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Bookmark className="w-4 h-4 text-indigo-600" />
+                    <div>
+                      <span className="text-xs font-mono font-extrabold text-slate-900 block">
+                        Demirbaş No: {inspectModalItem.copy_code || (inspectModalItem.book_isbn ? `DEM-${inspectModalItem.book_isbn.replace(/\D/g, '')}-K1` : 'DEM-K1')}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Barkod: {(inspectModalItem.copy_code ? inspectModalItem.copy_code.replace(/\D/g, '') : '') || (inspectModalItem.book_isbn ? `${inspectModalItem.book_isbn.replace(/\D/g, '')}01` : '000000000000001')}
+                      </span>
+                    </div>
+                  </div>
+                  {(inspectModalItem.call_number || books.find((b) => b.id === inspectModalItem.book_id)?.call_number) && (
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block font-semibold">Raf / Yer Kodu</span>
+                      <span className="text-xs font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                        {inspectModalItem.call_number || books.find((b) => b.id === inspectModalItem.book_id)?.call_number}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-200">
+                  ℹ️ Fiziksel kitabın iç veya arka kapağındaki demirbaş barkodu ile sistem kaydını eşleştiriniz.
+                </p>
+              </div>
+
               {inspectModalItem.return_notes && (
                 <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
                   <strong className="block mb-0.5">Üyenin İade Bildirimi / Notu:</strong>
@@ -3554,6 +3623,113 @@ export default function AdminPanel({
                 >
                   <ShieldAlert className="w-4 h-4" />
                   {banSubmitting ? 'Uygulanıyor...' : 'Kullanıcıyı Banla & Notu Kaydet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin: Ödünç Teslim Onayı & Nüsha Demirbaş Doğrulama Modalı */}
+      {deliverModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Check className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-emerald-950">
+                    Ödünç Kitap Teslim Onayı & Demirbaş Eşleme
+                  </h3>
+                  <p className="text-xs text-emerald-800 font-medium">
+                    {deliverModalItem.user_full_name} — "{deliverModalItem.book_title}"
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setDeliverModalItem(null)}
+                className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-900 hover:bg-emerald-100 cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDeliverBorrowSubmit} className="p-6 space-y-4">
+              <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-900 space-y-1.5">
+                <p className="font-bold flex items-center gap-1.5 text-indigo-950">
+                  <Bookmark className="w-4 h-4 text-indigo-600 shrink-0" />
+                  Kütüphane Teslimat Prosedürü
+                </p>
+                <p>
+                  • Bu onay ile birlikte kitap okuyucuya fiziki olarak teslim edilmiş sayılır ve <strong>14 günlük yasal ödünç süresi</strong> başlar.
+                </p>
+                <p>
+                  • Lütfen okuyucuya teslim ettiğiniz fiziksel kitabın arka veya iç kapağındaki demirbaş kodunu kontrol ediniz.
+                </p>
+              </div>
+
+              {/* Raf / Yer Kodu Bilgisi */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-semibold">Kütüphane Raf / Yer Kodu:</span>
+                <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                  {deliverModalItem.call_number || books.find((b) => b.id === deliverModalItem.book_id)?.call_number || '800 / GEN'}
+                </span>
+              </div>
+
+              {/* Teslim Edilen Nüsha / Demirbaş Kodu */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Teslim Edilen Nüsha Demirbaş / Kopya Kodu *
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={deliverCopyCode}
+                    onChange={(e) => setDeliverCopyCode(e.target.value)}
+                    placeholder="Örn: DEM-9789750718533-K1"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono font-bold text-indigo-900 bg-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <span className="absolute right-3 top-2.5 text-[10px] uppercase font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                    Demirbaş Barkodu
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Sistem raftaki ilk müsait kopyayı otomatik önerir. Raftan farklı bir nüsha aldıysanız kodu güncelleyebilirsiniz.
+                </p>
+              </div>
+
+              {/* Görevli Notu */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Görevli Notu (Opsiyonel)
+                </label>
+                <input
+                  type="text"
+                  value={deliverAdminNotes}
+                  onChange={(e) => setDeliverAdminNotes(e.target.value)}
+                  placeholder="Örn: Danışma bankosundan bizzat teslim edildi..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setDeliverModalItem(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={deliverSubmitting || !deliverCopyCode.trim()}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                  {deliverSubmitting ? 'İşleniyor...' : 'Teslimi Onayla ve Süreyi Başlat'}
                 </button>
               </div>
             </form>

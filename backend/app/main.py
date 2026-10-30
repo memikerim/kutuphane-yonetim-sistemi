@@ -76,6 +76,16 @@ def ensure_database_schema() -> None:
             )
             conn.execute(
                 text(
+                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS copy_code VARCHAR(50)"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE books ADD COLUMN IF NOT EXISTS call_number VARCHAR(50)"
+                )
+            )
+            conn.execute(
+                text(
                     "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'"
                 )
             )

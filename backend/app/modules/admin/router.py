@@ -139,7 +139,11 @@ def approve_borrow(
 ):
     try:
         return borrowing_service.admin_approve_borrow(
-            db, admin, id, admin_notes=data.admin_notes if data else None
+            db,
+            admin,
+            id,
+            admin_notes=data.admin_notes if data else None,
+            copy_code=data.copy_code if data else None,
         )
     except borrowing_service.NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

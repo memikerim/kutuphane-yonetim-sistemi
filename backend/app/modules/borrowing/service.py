@@ -381,6 +381,29 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
     # Race condition koruması için atomic update
     book.stock_count = Book.stock_count - 1
 
+    # Müsait ilk kopyanın demirbaş kodunu tespit et (Örn: DEM-978975...-K1)
+    assigned_copy_code = None
+    clean_isbn = "".join(ch for ch in (book.isbn or "") if ch.isdigit()) or "0000000000000"
+    used_copy_codes = {
+        row[0]
+        for row in db.query(Borrowing.copy_code)
+        .filter(
+            Borrowing.book_id == book.id,
+            Borrowing.return_date.is_(None),
+            Borrowing.status.in_([BorrowingStatus.ACTIVE, BorrowingStatus.OVERDUE]),
+            Borrowing.approval_status.in_(["PENDING_BORROW", "APPROVED", "PENDING_RETURN"]),
+            Borrowing.copy_code.isnot(None),
+        )
+        .all()
+        if row[0]
+    }
+
+    for i in range(1, 1000):
+        cand = f"DEM-{clean_isbn}-K{i}"
+        if cand not in used_copy_codes:
+            assigned_copy_code = cand
+            break
+
     approval_status = "PENDING_BORROW" if getattr(data, "request_approval", False) else "APPROVED"
     borrowing = Borrowing(
         user_id=user.id,
@@ -388,6 +411,7 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
         due_date=data.due_date,
         approval_status=approval_status,
         return_notes=getattr(data, "notes", None),
+        copy_code=assigned_copy_code,
     )
     db.add(borrowing)
 
@@ -529,12 +553,13 @@ def _complete_return_transaction(
         if cond == "DAMAGED"
         else "RETURN_LOST"
     )
+    c_code = getattr(borrowing, "assigned_copy_code", "DEM-K1")
     default_note = (
-        "Kitap sağlam olarak iade alındı ve rafa eklendi (+1)"
+        f"Kitap ({c_code}) sağlam olarak kütüphane rafına iade edildi"
         if cond == "GOOD"
-        else f"Hasarlı kitap iadesi ({dmg_penalty:.0f} TL hasar tazminatı yansıtıldı)"
+        else f"Hasarlı kitap iadesi ({c_code}, {dmg_penalty:.0f} TL hasar tazminatı yansıtıldı)"
         if cond == "DAMAGED"
-        else f"Kayıp kitap bildirimi ({dmg_penalty:.0f} TL kayıp bedeli yansıtıldı, 1 adet kalıcı stoktan düşüldü)"
+        else f"Kayıp kitap bildirimi ({c_code}, {dmg_penalty:.0f} TL kayıp bedeli yansıtıldı, envanterden düşüldü)"
     )
     combined_note = notes or borrowing.admin_notes or borrowing.return_notes or default_note
 
@@ -963,6 +988,7 @@ def admin_approve_borrow(
     admin_user: User,
     borrowing_id: uuid.UUID,
     admin_notes: str | None = None,
+    copy_code: str | None = None,
 ) -> Borrowing:
     """Görevli (ADMIN) bekleyen ödünç talebini (PENDING_BORROW) onaylar ve kitabı teslim eder."""
     borrowing = db.get(Borrowing, borrowing_id)
@@ -980,6 +1006,12 @@ def admin_approve_borrow(
         borrowing.admin_notes = admin_notes
 
     book = db.get(Book, borrowing.book_id)
+    if copy_code and copy_code.strip():
+        borrowing.copy_code = copy_code.strip()
+    elif not borrowing.copy_code and book:
+        clean_isbn = "".join(ch for ch in (book.isbn or "") if ch.isdigit()) or "0000000000000"
+        borrowing.copy_code = f"DEM-{clean_isbn}-K1"
+
     cur_stock = int(book.stock_count or 0) if book else 0
     if book:
         db.add(
@@ -994,7 +1026,7 @@ def admin_approve_borrow(
                 stock_before=cur_stock,
                 stock_after=cur_stock,
                 penalty_added=0.0,
-                notes=admin_notes or "Ödünç talebi görevli tarafından onaylandı ve kitap üyeye teslim edildi",
+                notes=admin_notes or f"Ödünç talebi görevli tarafından onaylandı ve nüsha ({borrowing.copy_code}) üyeye teslim edildi",
             )
         )
 

@@ -44,6 +44,8 @@ class BorrowingRead(BaseModel):
     book_isbn: str | None = None
     book_cover_url: str | None = None
     book_author: str | None = None
+    copy_code: str | None = None
+    call_number: str | None = None
     is_rejection_read: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -88,6 +90,7 @@ class BorrowingReturn(BaseModel):
 
 
 class AdminApproveBorrowRequest(BaseModel):
+    copy_code: str | None = Field(default=None, max_length=50, description="Teslim edilen nüshanın demirbaş kodu (örn: DEM-9789750718533-K1)")
     admin_notes: str | None = Field(default=None, max_length=500)
 
 
@@ -96,6 +99,7 @@ class AdminRejectBorrowRequest(BaseModel):
 
 
 class AdminApproveReturnRequest(BaseModel):
+    verified_copy_code: str | None = Field(default=None, max_length=50, description="Teslim alınan ve fiziksel kontrolü yapılan nüsha kodu")
     return_condition: str = Field(
         default="GOOD",
         description="Görevli tarafından doğrulanan fiziksel durum: GOOD, DAMAGED, LOST",

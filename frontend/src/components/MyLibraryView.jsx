@@ -16,6 +16,9 @@ import {
   ChevronRight,
   ShieldCheck,
   X,
+  Bookmark,
+  Barcode,
+  Hash,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -587,6 +590,21 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                                   ` • ${book.authors.map((a) => `${a.first_name} ${a.last_name}`).join(', ')}`}
                               </p>
                             )}
+
+                            {/* Kütüphane Nüsha & Yer Kodu Rozeti */}
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              {(item.copy_code || item.book_isbn || book?.isbn) && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  <Bookmark className="w-3 h-3 text-indigo-500" />
+                                  Demirbaş: {item.copy_code || `DEM-${(item.book_isbn || book?.isbn || '').replace(/\D/g, '')}-K1`}
+                                </span>
+                              )}
+                              {(item.call_number || book?.call_number) && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                  Yer / Raf: {item.call_number || book?.call_number}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           <div className="flex flex-col items-end gap-1 shrink-0">
@@ -1100,6 +1118,34 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                 </p>
               </div>
 
+              {/* Teslim Edilecek Nüsha & Demirbaş Kodu */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Bookmark className="w-4 h-4 text-indigo-600" />
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                      Teslim Edilecek Nüsha (Demirbaş No)
+                    </span>
+                    <span className="text-xs font-mono font-extrabold text-indigo-900">
+                      {returnModalItem.copy_code ||
+                        (bookMap[returnModalItem.book_id]?.isbn
+                          ? `DEM-${bookMap[returnModalItem.book_id].isbn.replace(/\D/g, '')}-K1`
+                          : 'DEM-K1')}
+                    </span>
+                  </div>
+                </div>
+                {(returnModalItem.call_number || bookMap[returnModalItem.book_id]?.call_number) && (
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                      Kütüphane Yer Kodu
+                    </span>
+                    <span className="text-xs font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                      {returnModalItem.call_number || bookMap[returnModalItem.book_id]?.call_number}
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">
                   Kitabın Fiziksel Durumu Nedir?
@@ -1265,6 +1311,17 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                     <p className="text-xs text-slate-500 mt-0.5 font-mono">
                       ISBN: {bookMap[reserveBorrowModalItem.book_id]?.isbn || '-'}
                     </p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        <Bookmark className="w-3 h-3 text-indigo-500" />
+                        Ayrılan Nüsha: {bookMap[reserveBorrowModalItem.book_id]?.copies?.find((c) => c.status === 'AVAILABLE')?.copy_code || (bookMap[reserveBorrowModalItem.book_id]?.isbn ? `DEM-${bookMap[reserveBorrowModalItem.book_id].isbn.replace(/\D/g, '')}-K1` : 'DEM-K1')}
+                      </span>
+                      {bookMap[reserveBorrowModalItem.book_id]?.call_number && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                          Yer: {bookMap[reserveBorrowModalItem.book_id].call_number}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
                     Sıra Sizde (1. Sıra)

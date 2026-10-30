@@ -81,6 +81,7 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     )
     return_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     admin_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    copy_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_rejection_read: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -139,6 +140,25 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     @property
     def user_ban_reason(self) -> str | None:
         return getattr(self.user, "ban_reason", None) if self.user else None
+
+    @property
+    def call_number(self) -> str | None:
+        if self.book:
+            return getattr(self.book, "computed_call_number", None) or getattr(self.book, "call_number", None)
+        return None
+
+    @property
+    def assigned_copy_code(self) -> str:
+        if self.copy_code:
+            return self.copy_code
+        if self.book and getattr(self.book, "isbn", None):
+            try:
+                from app.modules.catalog.call_number import format_copy_code
+
+                return format_copy_code(self.book.isbn, 1)
+            except Exception:
+                pass
+        return "DEM-GEN-K1"
 
 
 
@@ -353,6 +373,25 @@ class StockMovement(UUIDPrimaryKeyMixin, Base):
     @property
     def user_ban_reason(self) -> str | None:
         return getattr(self.user, "ban_reason", None) if self.user else None
+
+    @property
+    def call_number(self) -> str | None:
+        if self.book:
+            return getattr(self.book, "computed_call_number", None) or getattr(self.book, "call_number", None)
+        return None
+
+    @property
+    def assigned_copy_code(self) -> str:
+        if self.copy_code:
+            return self.copy_code
+        if self.book and getattr(self.book, "isbn", None):
+            try:
+                from app.modules.catalog.call_number import format_copy_code
+
+                return format_copy_code(self.book.isbn, 1)
+            except Exception:
+                pass
+        return "DEM-GEN-K1"
 
     @property
     def user_full_name(self) -> str | None:

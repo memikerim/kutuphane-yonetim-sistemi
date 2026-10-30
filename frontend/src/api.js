@@ -108,6 +108,7 @@ export const api = {
   },
   getBook: (id) => request(`/books/${id}`),
   getBookHistory: (id) => request(`/books/${id}/history`),
+  getBookCopies: (id) => request(`/books/${id}/copies`),
   lookupIsbn: (isbn) =>
     request(`/books/lookup-isbn/${encodeURIComponent(isbn)}`),
   createBook: (data) =>

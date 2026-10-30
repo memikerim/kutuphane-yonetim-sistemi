@@ -13,6 +13,7 @@ from app.modules.catalog.schemas import (
     AuthorCreate,
     AuthorRead,
     AuthorUpdate,
+    BookCopyInfo,
     BookCreate,
     BookRead,
     BookUpdate,
@@ -164,6 +165,16 @@ def lookup_isbn(isbn: str, db: DbSession, admin: AdminDep):
 @router.get("/books/{id}", response_model=BookRead, summary="Kitap detay")
 def get_book(id: uuid.UUID, db: DbSession):
     return handle_service_error(service.get_book, db, id)
+
+
+@router.get(
+    "/books/{id}/copies",
+    response_model=list[BookCopyInfo],
+    summary="Kitabın kütüphane nüshalarını, demirbaş kodlarını ve durumlarını listeler",
+)
+def get_book_copies(id: uuid.UUID, db: DbSession):
+    book = handle_service_error(service.get_book, db, id)
+    return getattr(book, "copies", [])
 
 
 @router.get(

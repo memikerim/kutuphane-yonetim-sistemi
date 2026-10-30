@@ -18,6 +18,9 @@ import {
   User,
   ThumbsUp,
   ThumbsDown,
+  Bookmark,
+  Barcode,
+  Layers,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -462,6 +465,13 @@ export default function BookDetailModal({
                     <Hash className="w-3.5 h-3.5 text-slate-400" />
                     ISBN: {book.isbn}
                   </span>
+
+                  {book.call_number && (
+                    <span className="inline-flex items-center gap-1 text-xs font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                      <Bookmark className="w-3.5 h-3.5 text-purple-600" />
+                      Yer Kodu: {book.call_number}
+                    </span>
+                  )}
                 </div>
 
                 {/* Authors */}
@@ -742,6 +752,21 @@ export default function BookDetailModal({
                     </div>
 
                     <div className="bg-white/90 rounded-xl p-3 border border-indigo-200 text-xs text-slate-700 space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-indigo-100">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Kütüphane Yer / Raf Kodu</span>
+                          <span className="font-mono font-bold text-purple-700 text-xs">
+                            {book.call_number || '800 / GEN'}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Ayrılacak Nüsha Demirbaş No</span>
+                          <span className="font-mono font-bold text-indigo-700 text-xs">
+                            {book.copies?.find((c) => c.status === 'AVAILABLE')?.copy_code ||
+                              `DEM-${(book.isbn || '').replace(/\D/g, '')}-K1`}
+                          </span>
+                        </div>
+                      </div>
                       <p>
                         • <strong>Planlanan Son Teslim Tarihi:</strong>{' '}
                         <span className="font-bold text-indigo-700">{dueDate}</span>
@@ -870,6 +895,18 @@ export default function BookDetailModal({
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
+                  onClick={() => setDetailTab('copies')}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    detailTab === 'copies'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Barcode className="w-3.5 h-3.5" />
+                  Kütüphane Nüshaları & Demirbaş ({book.copies?.length || (book.stock_count || 0)})
+                </button>
+                <button
+                  type="button"
                   onClick={() => setDetailTab('reviews')}
                   className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                     detailTab === 'reviews'
@@ -911,6 +948,132 @@ export default function BookDetailModal({
                 </span>
               )}
             </div>
+
+            {detailTab === 'copies' && (
+              <div className="space-y-4">
+                {/* Genel Kütüphane Bilgileri Başlığı */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200/80 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-700 block">
+                      Kütüphane Yer ve Sınıflama Numarası (Dewey / LC Call Number)
+                    </span>
+                    <span className="text-sm sm:text-base font-mono font-extrabold text-purple-950 flex items-center gap-1.5 mt-0.5">
+                      <Bookmark className="w-4 h-4 text-purple-600" />
+                      {book.call_number || '800 / GEN'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs">
+                    <div className="bg-white/90 px-3 py-1.5 rounded-xl border border-purple-200">
+                      <span className="text-slate-500 block text-[10px] uppercase font-bold">Toplam Nüsha</span>
+                      <strong className="text-slate-900 text-sm">
+                        {book.copies?.length || (book.stock_count || 0)} Adet
+                      </strong>
+                    </div>
+                    <div className="bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
+                      <span className="text-emerald-700 block text-[10px] uppercase font-bold">Rafta Müsait</span>
+                      <strong className="text-emerald-900 text-sm">
+                        {book.stock_count || 0} Adet
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Nüsha Listesi Tablosu */}
+                <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-2xs">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        <th className="py-3 px-4">Kopya No</th>
+                        <th className="py-3 px-4">Demirbaş / Nüsha Kodu</th>
+                        <th className="py-3 px-4">Barkod No</th>
+                        <th className="py-3 px-4">Fiziksel Durum / Konum</th>
+                        <th className="py-3 px-4 text-right">Zimmet / İade Bilgisi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {book.copies && book.copies.length > 0 ? (
+                        book.copies.map((copy) => {
+                          const isAvailable = copy.status === 'AVAILABLE';
+                          const isPendingBorrow = copy.status === 'PENDING_BORROW';
+                          const isPendingReturn = copy.status === 'PENDING_RETURN';
+                          const isOverdue = copy.status === 'OVERDUE';
+
+                          return (
+                            <tr key={copy.copy_code} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3 px-4 font-bold text-slate-700">
+                                {copy.copy_number}. Kopya
+                              </td>
+                              <td className="py-3 px-4 font-mono font-bold text-indigo-700">
+                                <span className="inline-flex items-center gap-1.5 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200/70">
+                                  <Bookmark className="w-3.5 h-3.5 text-indigo-500" />
+                                  {copy.copy_code}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-mono text-slate-500">
+                                <span className="inline-flex items-center gap-1">
+                                  <Barcode className="w-3.5 h-3.5 text-slate-400" />
+                                  {copy.barcode}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                {isAvailable ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    Rafta (Müsait)
+                                  </span>
+                                ) : isPendingBorrow ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                    <Clock className="w-3 h-3 text-amber-600 animate-pulse" />
+                                    Teslim Onayı Bekliyor
+                                  </span>
+                                ) : isPendingReturn ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-300">
+                                    <ShieldAlert className="w-3 h-3 text-indigo-600 animate-pulse" />
+                                    İade Kontrolünde
+                                  </span>
+                                ) : isOverdue ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-600 text-white">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    Gecikmede (Ödünç)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-900 border border-blue-300">
+                                    <BookOpen className="w-3 h-3 text-blue-600" />
+                                    Ödünç Verildi
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right text-slate-600">
+                                {copy.borrower_name ? (
+                                  <div>
+                                    <span className="font-semibold text-slate-900 block">{copy.borrower_name}</span>
+                                    {copy.due_date && (
+                                      <span className="text-[11px] text-slate-500">
+                                        Son Teslim: {copy.due_date}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 font-mono text-[11px]">
+                                    Kütüphane Danışmasında
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={5} className="py-6 text-center text-slate-400">
+                            Henüz kayıtlı nüsha bilgisi bulunamadı.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {detailTab === 'reviews' && (
               <>

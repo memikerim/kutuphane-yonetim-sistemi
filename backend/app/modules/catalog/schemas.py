@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 NameStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
@@ -52,12 +52,27 @@ class AuthorRead(AuthorBase):
     id: uuid.UUID
     model_config = ConfigDict(from_attributes=True)
 
+# --- Book Copy Info ---
+class BookCopyInfo(BaseModel):
+    copy_number: int
+    copy_code: str
+    barcode: str
+    status: str
+    status_label: str
+    borrower_name: str | None = None
+    due_date: date | None = None
+    borrowing_id: uuid.UUID | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 # --- Book ---
 class BookBase(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     isbn: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=17)]
     published_year: int | None = None
     stock_count: int = Field(default=0, ge=0)
+    call_number: str | None = None
     cover_url: str | None = None
 
 class BookCreate(BookBase):
@@ -70,6 +85,7 @@ class BookUpdate(BaseModel):
     isbn: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=17)] | None = None
     published_year: int | None = None
     stock_count: int | None = Field(default=None, ge=0)
+    call_number: str | None = None
     cover_url: str | None = None
     publisher_id: uuid.UUID | None = None
     author_ids: list[uuid.UUID] | None = None
@@ -77,13 +93,32 @@ class BookUpdate(BaseModel):
 
 class BookRead(BookBase):
     id: uuid.UUID
+    call_number: str | None = None
     publisher: PublisherRead | None = None
     authors: list[AuthorRead] = []
     categories: list[CategoryRead] = []
     reserved_count: int = 0
     reservation_queue_user_ids: list[uuid.UUID] = []
     active_reservation_expires_at: datetime | None = None
+    copies: list[BookCopyInfo] = []
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def compute_call_number_if_missing(self) -> "BookRead":
+        if not self.call_number and self.title:
+            try:
+                from app.modules.catalog.call_number import generate_dewey_call_number
+
+                primary_author = self.authors[0].name if self.authors else None
+                self.call_number = generate_dewey_call_number(
+                    categories=self.categories,
+                    author_name=primary_author,
+                    title=self.title,
+                    published_year=self.published_year,
+                )
+            except Exception:
+                self.call_number = f"800 / GEN-{self.published_year or 2026}"
+        return self
 
 # --- ISBN Lookup ---
 class IsbnLookupResponse(BaseModel):
