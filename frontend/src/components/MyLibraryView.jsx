@@ -58,6 +58,29 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
   const [reserveNotes, setReserveNotes] = useState('');
   const [reserveSubmitting, setReserveSubmitting] = useState(false);
 
+  // Planlanan rezervasyon ödünç süresi (dinamik gün farkı)
+  const selectedReserveBorrowDays = (() => {
+    if (!reserveDueDate) return 14;
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const parts = reserveDueDate.split('-');
+      if (parts.length === 3) {
+        const target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const diffMs = target.getTime() - today.getTime();
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 1;
+      }
+      const target = new Date(reserveDueDate);
+      target.setHours(0, 0, 0, 0);
+      const diffMs = target.getTime() - today.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      return diffDays > 0 ? diffDays : 1;
+    } catch {
+      return 14;
+    }
+  })();
+
   // Ceza Ödeme Onay Modalı State'i
   const [payPenaltyModalItem, setPayPenaltyModalItem] = useState(null);
   const [payPenaltySubmitting, setPayPenaltySubmitting] = useState(false);
@@ -1381,7 +1404,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                   <span>Önemli Teslimat ve Ödünç Süresi Bilgilendirmesi</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-amber-900">
-                  • <strong>Ödünç Süresi Başlangıcı:</strong> Ödünç süreniz (14 gün), sizin kütüphaneye gidip kitabı fiziksel aldığınız tarihe göre değil; <strong>kütüphane görevlisi talebinizi onayladığı anda kitap teslim edilmiş sayılır ve 14 günlük süreniz başlar</strong>.
+                  • <strong>Ödünç Süresi Başlangıcı:</strong> Seçtiğiniz iade tarihine göre ödünç süreniz (<strong>{selectedReserveBorrowDays} gün</strong>), sizin kütüphaneye gidip kitabı fiziksel aldığınız tarihe göre değil; <strong>kütüphane görevlisi talebinizi onayladığı anda kitap teslim edilmiş sayılır ve {selectedReserveBorrowDays} günlük süreniz başlar</strong>.
                 </p>
                 <p className="text-[11px] leading-relaxed text-amber-900">
                   • <strong>Kütüphaneye Gelme Zamanı:</strong> Kitap sizin için rafta ayrılmıştır. Görevli onaylamadan kütüphaneye gelmeyiniz. <strong>"Bildirimler"</strong> sekmenizden onay mesajını gördükten sonra en kısa sürede kütüphane danışma bankosundan kitabınızı teslim alınız.

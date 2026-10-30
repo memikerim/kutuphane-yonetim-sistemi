@@ -49,6 +49,29 @@ export default function BookDetailModal({
   const [actionLoading, setActionLoading] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
 
+  // Planlanan teslim tarihine göre dinamik gün farkı
+  const selectedBorrowDays = (() => {
+    if (!dueDate) return 14;
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const parts = dueDate.split('-');
+      if (parts.length === 3) {
+        const target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const diffMs = target.getTime() - today.getTime();
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 1;
+      }
+      const target = new Date(dueDate);
+      target.setHours(0, 0, 0, 0);
+      const diffMs = target.getTime() - today.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      return diffDays > 0 ? diffDays : 1;
+    } catch {
+      return 14;
+    }
+  })();
+
   // Onay ve İş Akışı Kontrol State'leri
   const [confirmMode, setConfirmMode] = useState(null); // null | 'borrow' | 'reserve'
   const [borrowNotes, setBorrowNotes] = useState('');
@@ -744,7 +767,7 @@ export default function BookDetailModal({
                         <span>Önemli Teslimat ve Ödünç Süresi Bilgilendirmesi</span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-amber-900">
-                        • <strong>Ödünç Süresi Başlangıcı:</strong> Ödünç süreniz (14 gün), kitabı kütüphaneden gidip teslim aldığınız ana bağlı değildir; <strong>kütüphane görevlisi talebinizi onayladığı anda kitap teslim edilmiş sayılır ve 14 günlük süreniz işlemeye başlar</strong>.
+                        • <strong>Ödünç Süresi Başlangıcı:</strong> Seçtiğiniz iade tarihine göre ödünç süreniz (<strong>{selectedBorrowDays} gün</strong>), kitabı kütüphaneden gidip teslim aldığınız ana bağlı değildir; <strong>kütüphane görevlisi talebinizi onayladığı anda kitap teslim edilmiş sayılır ve {selectedBorrowDays} günlük süreniz işlemeye başlar</strong>.
                       </p>
                       <p className="text-[11px] leading-relaxed text-amber-900">
                         • <strong>Kütüphaneye Gelme Zamanı:</strong> Kitap kütüphanede adınıza ayrılır. Görevli onaylamadan önce lütfen kütüphaneye gelmeyiniz. <strong>"Bildirimler"</strong> menünüzden onay mesajını gördükten sonra gecikmeden kütüphane bankosundan kitabınızı teslim alınız.

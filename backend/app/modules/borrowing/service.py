@@ -1489,6 +1489,8 @@ def get_user_and_admin_notifications(
 
         # C4) Görevli Onayında Bekleyen Ödünç Talebi
         if b.status != BorrowingStatus.RETURNED and approval_st == "PENDING_BORROW":
+            today_d = date.today()
+            b_days = max(1, (b.due_date - today_d).days) if b.due_date else 14
             items.append(
                 NotificationItem(
                     id=f"user-borrow-pend-{b.id}",
@@ -1496,7 +1498,7 @@ def get_user_and_admin_notifications(
                     type="PENDING_BORROW",
                     severity="info",
                     title="Ödünç Talebiniz Onay Bekliyor",
-                    message=f"'{b_title}' ödünç alma talebiniz kütüphane görevlisinin teslim onayını bekliyor. Görevli onayladığı anda kitap teslim edilmiş sayılarak 14 günlük süreniz başlayacaktır.",
+                    message=f"'{b_title}' ödünç alma talebiniz kütüphane görevlisinin teslim onayını bekliyor. Görevli onayladığı anda kitap teslim edilmiş sayılarak {b_days} günlük süreniz başlayacaktır.",
                     action_type="VIEW_BORROW_STATUS",
                     meta={"borrowing_id": str(b.id), "book_title": b_title},
                 )

@@ -146,3 +146,4 @@ def format_barcode(isbn: str | None, copy_number: int) -> str:
     """Fiziki nüsha barkodunu üretir: örn. '978975071853301'"""
     clean_isbn = get_clean_isbn(isbn)
     return f"{clean_isbn}{copy_number:02d}"
+

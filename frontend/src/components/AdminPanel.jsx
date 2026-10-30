@@ -320,6 +320,28 @@ export default function AdminPanel({
     if (e) e.preventDefault();
     if (!deliverModalItem) return;
 
+    const deliverBorrowDays = (() => {
+      if (!deliverModalItem?.due_date) return 14;
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const parts = deliverModalItem.due_date.split('-');
+        if (parts.length === 3) {
+          const target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+          const diffMs = target.getTime() - today.getTime();
+          const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+          return diffDays > 0 ? diffDays : 1;
+        }
+        const target = new Date(deliverModalItem.due_date);
+        target.setHours(0, 0, 0, 0);
+        const diffMs = target.getTime() - today.getTime();
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 1;
+      } catch {
+        return 14;
+      }
+    })();
+
     setDeliverSubmitting(true);
     setProcessingWorkflowId(deliverModalItem.id);
     try {
@@ -328,7 +350,7 @@ export default function AdminPanel({
         admin_notes: deliverAdminNotes.trim() || 'Görevli tarafından fiziksel teslim onaylandı.',
       });
       notify(
-        `"${deliverModalItem.user_full_name}" kullanıcısına "${deliverModalItem.book_title}" kitabı (Nüsha: ${deliverCopyCode}) teslim edildi ve 14 günlük süre başlatıldı!`,
+        `"${deliverModalItem.user_full_name}" kullanıcısına "${deliverModalItem.book_title}" kitabı (Nüsha: ${deliverCopyCode}) teslim edildi ve ${deliverBorrowDays} günlük süre başlatıldı!`,
         'success'
       );
       setDeliverModalItem(null);
@@ -3662,9 +3684,26 @@ export default function AdminPanel({
                   <Bookmark className="w-4 h-4 text-indigo-600 shrink-0" />
                   Kütüphane Teslimat Prosedürü
                 </p>
-                <p>
-                  • Bu onay ile birlikte kitap okuyucuya fiziki olarak teslim edilmiş sayılır ve <strong>14 günlük yasal ödünç süresi</strong> başlar.
-                </p>
+                {(() => {
+                  let dDays = 14;
+                  try {
+                    if (deliverModalItem?.due_date) {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const parts = deliverModalItem.due_date.split('-');
+                      if (parts.length === 3) {
+                        const target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                        const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                        dDays = diffDays > 0 ? diffDays : 1;
+                      }
+                    }
+                  } catch {}
+                  return (
+                    <p>
+                      • Bu onay ile birlikte kitap okuyucuya fiziki olarak teslim edilmiş sayılır ve <strong>{dDays} günlük ödünç süresi</strong> başlar (Son Teslim: {deliverModalItem?.due_date}).
+                    </p>
+                  );
+                })()}
                 <p>
                   • Lütfen okuyucuya teslim ettiğiniz fiziksel kitabın arka veya iç kapağındaki demirbaş kodunu kontrol ediniz.
                 </p>
