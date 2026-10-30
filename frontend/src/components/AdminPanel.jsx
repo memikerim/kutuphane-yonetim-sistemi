@@ -336,7 +336,7 @@ export default function AdminPanel({
     try {
       await api.rejectBorrow(item.id, { admin_notes: finalReason });
       notify(
-        `"${item.user_full_name}" kullanıcısının ödünç talebi reddedildi, +1 stok rafa eklendi ve gerekçe kullanıcıya bildirim olarak iletildi.`,
+        `"${item.user_full_name}" kullanıcısının ödünç talebi reddedildi, kitap rafa geri döndürüldü ve gerekçe kullanıcıya bildirim olarak iletildi.`,
         'info'
       );
       setRejectModalItem(null);
@@ -378,10 +378,10 @@ export default function AdminPanel({
       });
       notify(
         inspectCondition === 'GOOD'
-          ? 'İade fiziksel kontrolü onaylandı! Kitap sağlam olarak rafa (+1 stok) eklendi.'
+          ? 'İade teslimi onaylandı! Kitap kütüphane rafına sağlam olarak geri döndü.'
           : inspectCondition === 'DAMAGED'
           ? `Hasarlı kitap iadesi onaylandı ve hasar tazminatı (${inspectDamagePenalty} TL) yansıtıldı.`
-          : `Kayıp kitap raporu onaylandı, stoktan düşüldü ve kayıp tazminatı (${inspectDamagePenalty} TL) yansıtıldı.`,
+          : `Kayıp kitap raporu onaylandı, envanterden düşüldü ve kayıp tazminatı (${inspectDamagePenalty} TL) yansıtıldı.`,
         'success'
       );
       setInspectModalItem(null);
@@ -1283,7 +1283,7 @@ export default function AdminPanel({
                 {stockSummary?.lost_count ?? stockSummary?.lost_reports_count ?? 0} Adet
               </div>
               <p className="text-[11px] text-rose-700/90 mt-1">
-                Kaybedilen ve stoktan kalıcı düşülen kitaplar (-1 stok)
+                Kaybedilen ve kütüphane envanterinden düşülen kitaplar
               </p>
             </div>
 
@@ -2038,7 +2038,7 @@ export default function AdminPanel({
                                 className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 disabled:opacity-60 text-rose-700 border border-rose-200 text-xs font-bold transition-colors cursor-pointer"
                               >
                                 <X className="w-3.5 h-3.5" />
-                                Reddet (+1 Stok)
+                                Talebi Reddet
                               </button>
                             </div>
                           ) : !isReturned ? (
@@ -3219,10 +3219,10 @@ export default function AdminPanel({
                     />
                     <div className="text-xs">
                       <span className="font-bold text-slate-900 block">
-                        Sağlam (GOOD) — Rafa Geri Ekle (+1 Stok)
+                        Sağlam Teslim Alındı — Kütüphane Rafına İade Et
                       </span>
                       <span className="text-slate-500">
-                        Kitap eksiksiz ve hasarsız teslim alındı, stok adedi +1 artırılır.
+                        Kitap eksiksiz ve hasarsız teslim alındı, kütüphane rafına geri konulur.
                       </span>
                     </div>
                   </label>
@@ -3274,10 +3274,10 @@ export default function AdminPanel({
                     />
                     <div className="text-xs">
                       <span className="font-bold text-rose-950 block">
-                        Kayıp Kitap (LOST) — Stoktan Kalıcı Düş & Kayıp Tazminatı
+                        Kayıp Kitap (LOST) — Envanterden Düşüm & Kayıp Tazminatı
                       </span>
                       <span className="text-rose-800">
-                        Kitap rafa dönmez (stok artırılmaz), kayıp raporu oluşturulur ve tazminat yansıtılır.
+                        Kitap rafa dönmez, kayıp raporu oluşturularak üyenin hesabına kayıp bedeli yansıtılır.
                       </span>
                     </div>
                   </label>
@@ -3594,7 +3594,7 @@ export default function AdminPanel({
                   İşlem Hakkında Bilgilendirme
                 </p>
                 <p>
-                  • Bu işlem ödünç talebini iptal eder ve rezerve/tahsis edilen <strong>1 adet kitabı rafa (stok)</strong> geri kazandırır.
+                  • Bu işlem ödünç talebini iptal eder ve kullanıcı adına ayrılan kitabı tekrar <strong>kütüphane rafına</strong> kazandırır.
                 </p>
                 <p>
                   • Belirttiğiniz ret gerekçesi kullanıcının <strong>Bildirimler</strong> sekmesine anlık olarak iletilir.
@@ -3654,7 +3654,7 @@ export default function AdminPanel({
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white shadow-sm cursor-pointer flex items-center gap-1.5"
                 >
                   <X className="w-4 h-4 stroke-[2.5]" />
-                  {rejectSubmitting ? 'İşleniyor...' : 'Talebi Reddet (+1 Stok) & Bildirim Gönder'}
+                  {rejectSubmitting ? 'İşleniyor...' : 'Talebi Reddet & Rafa İade Et'}
                 </button>
               </div>
             </form>

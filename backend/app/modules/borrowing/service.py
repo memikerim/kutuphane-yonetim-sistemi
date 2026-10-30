@@ -941,7 +941,7 @@ def cancel_borrow_request(db: Session, user: User, borrowing_id: uuid.UUID) -> B
                 stock_before=stock_before,
                 stock_after=stock_before + 1,
                 penalty_added=0.0,
-                notes="Kullanıcı ödünç talebini iptal etti (+1 stok iade edildi)",
+                notes="Kullanıcı ödünç talebini iptal etti; kitap kütüphane rafına iade edildi",
             )
         )
 
@@ -1464,7 +1464,7 @@ def get_user_and_admin_notifications(
                     type="PENDING_BORROW",
                     severity="info",
                     title="Ödünç Talebiniz Onay Bekliyor",
-                    message=f"'{b_title}' ödünç alma talebiniz kütüphane görevlisinin teslim onayını bekliyor.",
+                    message=f"'{b_title}' ödünç alma talebiniz kütüphane görevlisinin teslim onayını bekliyor. Görevli onayladığı anda kitap teslim edilmiş sayılarak 14 günlük süreniz başlayacaktır.",
                     action_type="VIEW_BORROW_STATUS",
                     meta={"borrowing_id": str(b.id), "book_title": b_title},
                 )
@@ -1479,7 +1479,7 @@ def get_user_and_admin_notifications(
                     type="PENDING_RETURN",
                     severity="info",
                     title="Kitap İadeniz Görevli Kontrolünde",
-                    message=f"'{b_title}' iade talebiniz görevlinin fiziksel durum kontrolü ve onayını bekliyor.",
+                    message=f"'{b_title}' iade tesliminiz kütüphane görevlisinin kondisyon kontrolünü bekliyor. Onaylandığında kitap raflara geri dönecek ve ödünç kaydınız kapatılacaktır.",
                     action_type="VIEW_RETURN_STATUS",
                     meta={"borrowing_id": str(b.id), "book_title": b_title},
                 )

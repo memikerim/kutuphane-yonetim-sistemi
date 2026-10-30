@@ -727,17 +727,17 @@ export default function BookDetailModal({
                       </button>
                     </div>
 
-                    {/* Önemli Uyarı: Görevli Onayı & Bildirim Uyarısı */}
-                    <div className="p-3 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-xs space-y-1">
+                    {/* Önemli Uyarı: Teslimat & Ödünç Süresi Bilgilendirmesi */}
+                    <div className="p-3.5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-xs space-y-2">
                       <div className="flex items-center gap-1.5 font-extrabold text-amber-900">
                         <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>Önemli Uyarı: Bildirim Gelmeden Kütüphaneye Gelmeyiniz</span>
+                        <span>Önemli Teslimat ve Ödünç Süresi Bilgilendirmesi</span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-amber-900">
-                        Ödünç talebiniz kütüphane görevlisinin incelemesine sunulur. Yoğunluk, kitap kondisyonu veya envanter durumu gereği <strong>talebiniz reddedilebilir</strong>.
+                        • <strong>Ödünç Süresi Başlangıcı:</strong> Ödünç süreniz (14 gün), kitabı kütüphaneden gidip teslim aldığınız ana bağlı değildir; <strong>kütüphane görevlisi talebinizi onayladığı anda kitap teslim edilmiş sayılır ve 14 günlük süreniz işlemeye başlar</strong>.
                       </p>
-                      <p className="text-[11px] font-bold text-amber-950">
-                        ⚠️ Hesabınızdaki "Bildirimler" sekmesinden onay bildirimini görmeden lütfen kütüphaneye teslim almaya gelmeyiniz!
+                      <p className="text-[11px] leading-relaxed text-amber-900">
+                        • <strong>Kütüphaneye Gelme Zamanı:</strong> Kitap kütüphanede adınıza ayrılır. Görevli onaylamadan önce lütfen kütüphaneye gelmeyiniz. <strong>"Bildirimler"</strong> menünüzden onay mesajını gördükten sonra gecikmeden kütüphane bankosundan kitabınızı teslim alınız.
                       </p>
                     </div>
 
@@ -747,14 +747,11 @@ export default function BookDetailModal({
                         <span className="font-bold text-indigo-700">{dueDate}</span>
                       </p>
                       <p>
-                        • <strong>İş Akışı & Görevli Onayı:</strong> Talebiniz oluşturulduğunda stoktan{' '}
-                        <strong>1 adet kopya sizin için ayrılır (-1)</strong> ve görevli (Admin) onay kuyruğuna düşer. Görevli onayladığında kitap aktif teslim statüsüne geçer.
+                        • <strong>Kütüphane Teslim Kuralı:</strong> Talebiniz onaylandığında kitap üzerinize zimmetlenir. Kütüphane çalışma saatleri içinde bankodan teslim alabilir ve süresi dolmadan iade etmeniz gerekir.
                       </p>
                       <p>
-                        • <strong>Ceza & Sorumluluk Kuralları:</strong> Gecikmelerde günlük{' '}
-                        <strong>10 TL</strong> gecikme cezası; kitabın hasarlı iadesinde{' '}
-                        <strong>100 TL hasar tazminatı</strong>, kaybı halinde ise{' '}
-                        <strong>250 TL kayıp bedeli</strong> uygulanır.
+                        • <strong>Gecikme & Sorumluluk Kuralları:</strong> Süresi aşan kitaplarda günlük{' '}
+                        <strong>10 TL</strong> gecikme bedeli uygulanır. Kitabın hasarlı veya kayıp iadesinde kütüphane tüzüğü gereğince hasar/kayıp tazminatı tahakkuk ettirilir.
                       </p>
                     </div>
 

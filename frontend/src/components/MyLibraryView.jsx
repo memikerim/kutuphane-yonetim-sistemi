@@ -162,10 +162,10 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
       });
       notify(
         returnCondition === 'GOOD'
-          ? 'İade talebiniz oluşturuldu! Görevli (Admin) fiziksel kontrol onayından sonra kitap rafa eklenecektir.'
+          ? 'İade talebiniz oluşturuldu! Kütüphane danışmasında görevli kondisyon kontrolünü tamamladığında ödünç kaydınız resmi olarak kapatılacaktır.'
           : returnCondition === 'DAMAGED'
-          ? 'Hasarlı kitap iade bildiriminiz görevli onay kuyruğuna iletildi.'
-          : 'Kayıp kitap bildiriminiz görevli onay kuyruğuna iletildi.',
+          ? 'Hasarlı kitap iade bildiriminiz kütüphane görevlisine iletildi.'
+          : 'Kayıp kitap bildiriminiz kütüphane görevlisine iletildi.',
         'info'
       );
       setReturnModalItem(null);
@@ -190,7 +190,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
     setCancellingBorrowId(borrowingId);
     try {
       await api.cancelBorrowRequest(borrowingId);
-      notify('Ödünç talebiniz iptal edildi ve ayrılan stok (+1) rafa geri eklendi.', 'info');
+      notify('Ödünç talebiniz iptal edildi; ayrılan kitap tekrar kütüphane raflarına döndürüldü.', 'info');
       setCancelBorrowModalItem(null);
       await fetchAll();
       if (onCatalogChanged) onCatalogChanged();
@@ -717,34 +717,35 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         )}
 
                         {isPendingBorrow && (
-                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
-                            <span className="font-bold flex items-center gap-1.5 text-amber-950">
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-950 space-y-1.5">
+                            <span className="font-extrabold flex items-center gap-1.5 text-amber-900">
                               <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-                              Görevli (Kütüphaneci) Teslim Onayı Bekleniyor
+                              Kütüphane Görevlisinin Teslim Onayı Bekleniyor
                             </span>
-                            <p className="text-[11px] text-amber-800">
-                              Kitap stoğu sizin için ayrılmıştır (-1). Görevli onayladığında ödünç süreniz başlar. İsterseniz talebi iptal edebilirsiniz.
+                            <p className="text-[11px] text-amber-900 leading-relaxed">
+                              Kitap kütüphanede adınıza ayrılmıştır. <strong>Ödünç süreniz, kitabı gidip bankodan fiziksel teslim aldığınız ana bağlı değildir; görevli onayladığı anda kitap teslim edilmiş sayılır ve 14 günlük ödünç süreniz başlar.</strong>
                             </p>
-                            <p className="text-[11px] font-bold text-amber-950">
-                              ⚠️ Bildirimler sekmesinden onay bildirimini görmeden lütfen kütüphaneye teslim almaya gelmeyiniz!
+                            <p className="text-[11px] font-bold text-amber-950 bg-amber-100/70 p-1.5 rounded-lg border border-amber-300">
+                              ⚠️ "Bildirimler" menünüzden görevli onayını görmeden lütfen kütüphaneye gelmeyiniz. Onay bildirimi geldikten sonra gecikmeden bankodan teslim alınız.
                             </p>
                           </div>
                         )}
 
                         {isPendingReturn && (
-                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-900">
-                            <span className="font-bold block">
-                              İade & Fiziksel Durum Kontrolü Bekleniyor (Bildirim:{' '}
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-950 space-y-1">
+                            <span className="font-extrabold flex items-center gap-1.5 text-indigo-900">
+                              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                              İade Teslim & Fiziksel Kontrol Aşamasında (Bildiriminiz:{' '}
                               {returnCond === 'GOOD'
-                                ? 'Sağlam'
+                                ? 'Sağlam / Eksiksiz'
                                 : returnCond === 'DAMAGED'
                                 ? 'Hasarlı'
                                 : 'Kayıp'}
                               )
                             </span>
-                            <span className="text-[11px] text-indigo-800">
-                              Görevli kitabın fiziksel durumunu kontrol edip onayladığında iade işleminiz tamamlanacaktır.
-                            </span>
+                            <p className="text-[11px] text-indigo-900 leading-relaxed">
+                              Kitabı kütüphane danışma/iade bankosuna teslim ettiğinizde görevli kondisyon kontrolünü tamamlar. Kitap raflara geri kazandırıldığında üzerinizdeki ödünç kaydı resmi olarak kapatılır.
+                            </p>
                           </div>
                         )}
 
@@ -1086,9 +1087,17 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
             </div>
 
             <form onSubmit={handleConfirmReturnSubmit} className="p-5 sm:p-6 space-y-4">
-              <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-3.5 text-xs text-indigo-900 leading-relaxed">
-                <strong className="block mb-1">Kontrollü İade İş Akışı:</strong>
-                İade talebiniz kütüphane görevlisinin onay kuyruğuna iletilir. Görevli kitabın fiziksel durumunu kontrol edip onayladığında kitap rafa (+1 stok) geri döner veya hasar/kayıp raporu işlenir.
+              <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-4 text-xs text-indigo-950 leading-relaxed space-y-1.5">
+                <strong className="block text-indigo-950 font-extrabold text-sm flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                  Kitap İade ve Teslim Prosedürü
+                </strong>
+                <p className="text-[11px] leading-relaxed text-indigo-900">
+                  Ödünç aldığınız kitabı kütüphane danışma/iade bankosuna fiziksel olarak teslim ettiğinizde, kütüphane görevlisi kitabın kondisyonunu (sayfa bütünlüğü, temizliği, yıpranma durumu) kontrol eder.
+                </p>
+                <p className="text-[11px] leading-relaxed text-indigo-900">
+                  Kitap eksiksiz teslim alındığında kütüphane raflarına geri döner ve üzerinizdeki ödünç kaydı resmi olarak kapatılır. Kitapta hasar veya kayıp olması durumunda kütüphane yönergeleri gereği tutanak tutulur ve tazminat tahakkuk eder.
+                </p>
               </div>
 
               <div>
@@ -1116,7 +1125,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         Sağlam / Eksiksiz (Ek Tazminat Yok)
                       </span>
                       <span className="text-slate-500">
-                        Kitapta herhangi bir yırtılma, su teması veya sayfa eksikliği bulunmuyor.
+                        Kitapta herhangi bir yırtılma, karalama, su teması veya sayfa eksikliği yoktur; rafa sağlam olarak teslim edilir.
                       </span>
                     </div>
                   </label>
@@ -1141,7 +1150,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         Hasar Görmüş (+100 TL Hasar Tazminatı)
                       </span>
                       <span className="text-amber-800">
-                        Cilt, kapak veya sayfalarda fiziksel hasar oluştu. Görevli incelemesi sonrası hasar raporu oluşturulur.
+                        Cilt, kapak veya sayfalarda yıpranma/hasar mevcuttur. Görevli incelemesiyle hasar tespit tutanağı düzenlenir.
                       </span>
                     </div>
                   </label>
@@ -1166,7 +1175,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                         Kayıp Kitap Bildirimi (+250 TL Kayıp Tazminatı)
                       </span>
                       <span className="text-rose-800">
-                        Kitap kaybedildi ve teslim edilemiyor. Kitap stoktan kalıcı düşülür ve kayıp tazminatı yansıtılır.
+                        Kitap kaybedilmiş olup teslim edilememektedir. Kütüphane envanterinden düşüm yapılarak kayıp tazminatı tahakkuk ettirilir.
                       </span>
                     </div>
                   </label>
@@ -1308,23 +1317,23 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
                 />
               </div>
 
-              {/* Önemli Uyarı: Görevli Onayı & Bildirim Uyarısı */}
-              <div className="p-3.5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-xs text-amber-950 space-y-1">
+              {/* Önemli Uyarı: Teslimat & Ödünç Süresi Bilgilendirmesi */}
+              <div className="p-3.5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-xs text-amber-950 space-y-2">
                 <div className="flex items-center gap-1.5 font-extrabold text-amber-900">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Önemli Uyarı: Bildirim Gelmeden Kütüphaneye Gelmeyiniz</span>
+                  <span>Önemli Teslimat ve Ödünç Süresi Bilgilendirmesi</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-amber-900">
-                  Ödünç talebiniz görevli onayına sunulur. Yoğunluk veya kitap kondisyonu gerekçesiyle <strong>talebiniz reddedilebilir</strong>.
+                  • <strong>Ödünç Süresi Başlangıcı:</strong> Ödünç süreniz (14 gün), sizin kütüphaneye gidip kitabı fiziksel aldığınız tarihe göre değil; <strong>kütüphane görevlisi talebinizi onayladığı anda kitap teslim edilmiş sayılır ve 14 günlük süreniz başlar</strong>.
                 </p>
-                <p className="text-[11px] font-bold text-amber-950">
-                  ⚠️ Hesabınızdaki "Bildirimler" sekmesinden onay bildirimini görmeden lütfen kütüphaneye teslim almaya gelmeyiniz!
+                <p className="text-[11px] leading-relaxed text-amber-900">
+                  • <strong>Kütüphaneye Gelme Zamanı:</strong> Kitap sizin için rafta ayrılmıştır. Görevli onaylamadan kütüphaneye gelmeyiniz. <strong>"Bildirimler"</strong> sekmenizden onay mesajını gördükten sonra en kısa sürede kütüphane danışma bankosundan kitabınızı teslim alınız.
                 </p>
               </div>
 
-              {/* Bilgilendirme Kutusu */}
-              <div className="p-3.5 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 leading-relaxed">
-                <strong>İş Akışı Bilgisi:</strong> Onay verdiğinizde ödünç alma talebiniz görevli kuyruğuna iletilecek ve rezervasyon sıranız başarıyla ödünç kaydına dönüştürülecektir.
+              {/* Rezervasyon Bilgisi */}
+              <div className="p-3 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 leading-relaxed">
+                <strong>Rezervasyon Geçişi:</strong> Sıranız gereği rezerve hakkınız resmi ödünç talebine dönüştürülür ve kütüphane görevlisinin onayına iletilir.
               </div>
 
               {/* Modal Butonları */}
