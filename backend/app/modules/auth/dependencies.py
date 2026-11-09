@@ -58,6 +58,24 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    db: DbSession,
+) -> User | None:
+    """Header varsa kullanıcıyı döner, yoksa veya geçersizse None döner."""
+    if credentials is None:
+        return None
+    try:
+        payload = decode_access_token(credentials.credentials)
+        user_id = uuid.UUID(payload["sub"])
+        return db.get(User, user_id)
+    except Exception:
+        return None
+
+
+OptionalCurrentUser = Annotated[User | None, Depends(get_optional_current_user)]
+
+
 def require_roles(allowed_roles: Iterable[RoleName | str]) -> Callable[[User], User]:
     """Kullanıcının izin verilen rollerden EN AZ BİRİNE sahip olmasını şart koşar.
 
@@ -65,10 +83,19 @@ def require_roles(allowed_roles: Iterable[RoleName | str]) -> Callable[[User], U
     eski token'lar o yetkiyi kullanmaya devam edemez.
     """
     allowed = {RoleName(role) for role in allowed_roles}  # geçersiz rol adı -> açılışta hata
+    if RoleName.ADMIN in allowed:
+        allowed.update({RoleName.SYSTEM_ADMIN, RoleName.LIBRARY_ADMIN})
 
     def role_checker(user: CurrentUser) -> User:
         user_roles = {role.name for role in user.roles}
-        if user_roles.isdisjoint(allowed):
+        has_allowed_role = not user_roles.isdisjoint(allowed)
+        if not has_allowed_role and RoleName.LIBRARY_ADMIN in allowed:
+            # Kullanıcının onaylı bir kütüphanede LIBRARY_ADMIN üyeliği varsa da izin ver
+            for mem in getattr(user, "library_memberships", []) or []:
+                if getattr(mem, "role", None) == "LIBRARY_ADMIN" and getattr(mem, "status", None) == "APPROVED":
+                    has_allowed_role = True
+                    break
+        if not has_allowed_role:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bu işlem için yetkiniz yok",

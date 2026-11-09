@@ -77,6 +77,7 @@ class BookBase(BaseModel):
     cover_url: str | None = None
 
 class BookCreate(BookBase):
+    library_id: uuid.UUID | None = None
     publisher_id: uuid.UUID | None = None
     author_ids: list[uuid.UUID] = Field(default_factory=list)
     category_ids: list[int] = Field(default_factory=list)
@@ -88,12 +89,19 @@ class BookUpdate(BaseModel):
     stock_count: int | None = Field(default=None, ge=0)
     call_number: str | None = None
     cover_url: str | None = None
+    library_id: uuid.UUID | None = None
     publisher_id: uuid.UUID | None = None
     author_ids: list[uuid.UUID] | None = None
     category_ids: list[int] | None = None
 
 class BookRead(BookBase):
     id: uuid.UUID
+    library_id: uuid.UUID | None = None
+    library_name: str | None = None
+    library_daily_fine_amount: float = 5.0
+    library_max_borrow_days: int = 14
+    library_max_books_per_user: int = 3
+    library_penalty_rules_text: str | None = None
     call_number: str | None = None
     publisher: PublisherRead | None = None
     authors: list[AuthorRead] = []

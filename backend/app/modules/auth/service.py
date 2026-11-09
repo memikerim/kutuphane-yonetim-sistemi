@@ -149,7 +149,8 @@ def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
         elif dmg_pen <= 0.0 and cond == "LOST":
             dmg_pen = float(settings.LOST_BOOK_PENALTY)
 
-        overdue_pen = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+        daily_rate = getattr(b, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
+        overdue_pen = round(overdue_days * daily_rate, 2)
         total_pen = float(b.penalty_amount or 0.0)
         if total_pen < round(overdue_pen + dmg_pen, 2):
             total_pen = round(overdue_pen + dmg_pen, 2)
@@ -177,7 +178,14 @@ def build_user_read_with_alerts(db: Session, user: User) -> UserRead:
             )
         )
 
+    from app.modules.library.service import get_user_memberships, is_user_system_admin
+
     base = UserRead.model_validate(user)
+    base.is_system_admin = is_user_system_admin(user)
+    try:
+        base.memberships = get_user_memberships(db, user)
+    except Exception:
+        base.memberships = []
     base.overdue_books_count = overdue_books_count
     base.unpaid_overdue_total = round(unpaid_overdue_total, 2)
     base.unpaid_damage_loss_total = round(unpaid_damage_loss_total, 2)

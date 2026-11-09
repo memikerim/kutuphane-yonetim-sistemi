@@ -13,7 +13,12 @@ from app.modules.admin.schemas import (
 )
 from app.modules.auth.models import RoleName, User
 from app.modules.borrowing.models import Borrowing, BorrowingStatus
-from app.modules.borrowing.service import BusinessRuleError, NotFoundError, sync_overdue_borrowings
+from app.modules.borrowing.service import (
+    BusinessRuleError,
+    ForbiddenError,
+    NotFoundError,
+    sync_overdue_borrowings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +31,38 @@ def _to_date(val: date | datetime | None) -> date | None:
     return val
 
 
-def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
+def get_unpaid_penalties(
+    db: Session,
+    library_id: uuid.UUID | None = None,
+    actor: User | None = None,
+) -> UnpaidPenaltiesResponse:
     """
     Hem iade edilmiş ama cezası henüz ödenmemiş kayıtları hem de şu an teslim tarihi
     geçmiş aktif (OVERDUE) veya hasar/kayıp bildirimi yapılmış ödünçlerden doğan güncel borçları döndürür.
     """
+    from app.modules.library.service import (
+        get_user_managed_library_ids,
+        is_user_system_admin,
+        require_library_admin_access,
+    )
+
     sync_overdue_borrowings(db)
     today = date.today()
 
-    stmt = select(Borrowing).order_by(Borrowing.due_date.asc())
+    stmt = select(Borrowing)
+    if actor is not None and not is_user_system_admin(actor):
+        if library_id is not None:
+            require_library_admin_access(db, actor, library_id)
+            stmt = stmt.where(Borrowing.library_id == library_id)
+        else:
+            managed = get_user_managed_library_ids(db, actor)
+            if not managed:
+                return UnpaidPenaltiesResponse(total_unpaid_amount=0.0, debtor_count=0, items=[])
+            stmt = stmt.where(Borrowing.library_id.in_(managed))
+    elif library_id is not None:
+        stmt = stmt.where(Borrowing.library_id == library_id)
+
+    stmt = stmt.order_by(Borrowing.due_date.asc())
     all_borrowings = db.scalars(stmt).all()
 
     items: list[UnpaidPenaltyItem] = []
@@ -91,7 +119,8 @@ def get_unpaid_penalties(db: Session) -> UnpaidPenaltiesResponse:
                     dmg_pen = float(settings.DAMAGED_BOOK_PENALTY)
                 elif dmg_pen <= 0.0 and cond == "LOST":
                     dmg_pen = float(settings.LOST_BOOK_PENALTY)
-                penalty = round(overdue_days * settings.DAILY_PENALTY_RATE + dmg_pen, 2)
+                daily_rate = getattr(b, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
+                penalty = round(overdue_days * daily_rate + dmg_pen, 2)
                 total_unpaid += penalty
                 items.append(
                     UnpaidPenaltyItem(
@@ -157,7 +186,8 @@ def _build_admin_user_item(db: Session, u: User) -> AdminUserItem:
                 dmg_pen = float(settings.DAMAGED_BOOK_PENALTY)
             elif dmg_pen <= 0.0 and cond == "LOST":
                 dmg_pen = float(settings.LOST_BOOK_PENALTY)
-            calc_pen = round(overdue_days * settings.DAILY_PENALTY_RATE + dmg_pen, 2)
+            daily_rate = getattr(b, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
+            calc_pen = round(overdue_days * daily_rate + dmg_pen, 2)
             pen = max(float(b.penalty_amount or 0.0), calc_pen)
             if pen > 0:
                 unpaid_total += pen
@@ -179,9 +209,42 @@ def _build_admin_user_item(db: Session, u: User) -> AdminUserItem:
     )
 
 
-def list_users_for_admin(db: Session) -> list[AdminUserItem]:
+def list_users_for_admin(
+    db: Session,
+    library_id: uuid.UUID | None = None,
+    actor: User | None = None,
+) -> list[AdminUserItem]:
+    from app.modules.library.models import LibraryMembership
+    from app.modules.library.service import (
+        get_user_managed_library_ids,
+        is_user_system_admin,
+        require_library_admin_access,
+    )
+
     sync_overdue_borrowings(db)
-    users = list(db.scalars(select(User).order_by(User.created_at.desc())).all())
+    stmt = select(User)
+    if actor is not None and not is_user_system_admin(actor):
+        if library_id is not None:
+            require_library_admin_access(db, actor, library_id)
+            member_uids = select(LibraryMembership.user_id).where(
+                LibraryMembership.library_id == library_id
+            )
+            stmt = stmt.where(User.id.in_(member_uids))
+        else:
+            managed = get_user_managed_library_ids(db, actor)
+            if not managed:
+                return []
+            member_uids = select(LibraryMembership.user_id).where(
+                LibraryMembership.library_id.in_(managed)
+            )
+            stmt = stmt.where(User.id.in_(member_uids))
+    elif library_id is not None:
+        member_uids = select(LibraryMembership.user_id).where(
+            LibraryMembership.library_id == library_id
+        )
+        stmt = stmt.where(User.id.in_(member_uids))
+
+    users = list(db.scalars(stmt.order_by(User.created_at.desc())).all())
     return [_build_admin_user_item(db, u) for u in users]
 
 
@@ -250,9 +313,14 @@ def approve_penalty_payment(
     borrowing_id: uuid.UUID,
 ) -> Borrowing:
     """Yöneticinin kullanıcının yaptığı ceza/tazminat ödemesini onaylayıp borcu resmi olarak kapatmasını sağlar."""
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
     borrowing = db.get(Borrowing, borrowing_id)
     if not borrowing:
         raise NotFoundError("Ödünç alma kaydı bulunamadı")
+    if borrowing.library_id is not None and not is_user_system_admin(admin_user):
+        if not is_user_library_admin(db, admin_user, borrowing.library_id):
+            raise ForbiddenError("Başka bir kütüphaneye ait ceza ödemesini onaylama yetkiniz bulunmamaktadır.")
 
     borrowing.penalty_payment_status = "PAID"
     borrowing.is_penalty_paid = True

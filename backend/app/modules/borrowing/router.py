@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, Query, status
 
 from app.core.database import DbSession
 from app.modules.auth.dependencies import CurrentUser
@@ -22,17 +22,23 @@ def handle_service_error(func, *args, **kwargs):
         return func(*args, **kwargs)
     except service.NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except service.ForbiddenError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
     except service.BusinessRuleError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 # --- Borrowing Endpoints ---
 @router.get("/borrowings", response_model=list[BorrowingRead], summary="Ödünç aldığım kitapları listele")
-def get_my_borrowings(db: DbSession, current_user: CurrentUser):
+def get_my_borrowings(
+    db: DbSession,
+    current_user: CurrentUser,
+    library_id: uuid.UUID | None = Query(None, description="Seçili kütüphaneye göre filtrele"),
+):
     """
     Giriş yapan kullanıcının ödünç aldığı tüm kitapları (aktif ve iade edilmiş) ödünç tarihine göre sıralı döner.
     """
-    return service.get_user_borrowings(db, current_user)
+    return service.get_user_borrowings(db, current_user, library_id=library_id)
 
 
 @router.post("/borrowings", response_model=BorrowingRead, status_code=status.HTTP_201_CREATED, summary="Kitap ödünç al")
@@ -97,11 +103,15 @@ def create_reservation(data: ReservationCreate, db: DbSession, current_user: Cur
 
 
 @router.get("/reservations", response_model=list[ReservationRead], summary="Rezervasyonlarımı listele")
-def get_my_reservations(db: DbSession, current_user: CurrentUser):
+def get_my_reservations(
+    db: DbSession,
+    current_user: CurrentUser,
+    library_id: uuid.UUID | None = Query(None, description="Seçili kütüphaneye göre filtrele"),
+):
     """
     Giriş yapan kullanıcının aktif rezervasyonlarını sıra ve 24 saatlik kalan süre bilgisiyle döner.
     """
-    return service.get_user_reservations(db, current_user)
+    return service.get_user_reservations(db, current_user, library_id=library_id)
 
 
 @router.delete("/reservations/{id}", status_code=status.HTTP_204_NO_CONTENT, summary="Rezervasyonu iptal et / sil")

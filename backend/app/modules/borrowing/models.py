@@ -11,6 +11,7 @@ from app.core.base_model import Base, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from app.modules.auth.models import User
     from app.modules.catalog.models import Book
+    from app.modules.library.models import Library
 
 
 def _ensure_utc(dt: datetime) -> datetime:
@@ -85,20 +86,50 @@ class Borrowing(UUIDPrimaryKeyMixin, Base):
     is_rejection_read: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    library_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("libraries.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="borrowings", lazy="selectin")
     book: Mapped["Book"] = relationship(back_populates="borrowings", lazy="selectin")
+    library: Mapped["Library | None"] = relationship(lazy="selectin")
+
+    @property
+    def effective_daily_fine_rate(self) -> float:
+        from app.core.config import settings
+
+        if self.library and self.library.daily_fine_amount is not None:
+            return float(self.library.daily_fine_amount)
+        if self.book and getattr(self.book, "library", None) and self.book.library.daily_fine_amount is not None:
+            return float(self.book.library.daily_fine_amount)
+        return float(settings.DAILY_PENALTY_RATE)
+
+    @property
+    def library_name(self) -> str | None:
+        if self.library:
+            return self.library.name
+        if self.book and getattr(self.book, "library", None):
+            return self.book.library.name
+        return None
+
+    @property
+    def library_daily_fine(self) -> float | None:
+        if self.library and self.library.daily_fine_amount is not None:
+            return float(self.library.daily_fine_amount)
+        if self.book and getattr(self.book, "library", None) and self.book.library.daily_fine_amount is not None:
+            return float(self.book.library.daily_fine_amount)
+        return None
 
     @property
     def overdue_days(self) -> int:
-        from app.core.config import settings
+        rate = self.effective_daily_fine_rate
 
         if self.status == BorrowingStatus.RETURNED:
             if self.return_date and self.due_date and self.return_date > self.due_date:
                 return (self.return_date - self.due_date).days
             overdue_part = max(0.0, float(self.penalty_amount or 0.0) - float(self.damage_penalty or 0.0))
-            if overdue_part > 0 and settings.DAILY_PENALTY_RATE > 0:
-                return int(round(overdue_part / settings.DAILY_PENALTY_RATE))
+            if overdue_part > 0 and rate > 0:
+                return int(round(overdue_part / rate))
             return 0
         if self.approval_status == "PENDING_BORROW":
             return 0
@@ -198,9 +229,21 @@ class Reservation(UUIDPrimaryKeyMixin, Base):
         default=ReservationStatus.PENDING,
         server_default=ReservationStatus.PENDING.value,
     )
+    library_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("libraries.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="reservations")
     book: Mapped["Book"] = relationship(back_populates="reservations", lazy="selectin")
+    library: Mapped["Library | None"] = relationship(lazy="selectin")
+
+    @property
+    def library_name(self) -> str | None:
+        if self.library:
+            return self.library.name
+        if self.book and getattr(self.book, "library", None):
+            return self.book.library.name
+        return None
 
     @property
     def remaining_seconds(self) -> int | None:
@@ -343,10 +386,14 @@ class StockMovement(UUIDPrimaryKeyMixin, Base):
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
     )
+    library_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("libraries.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     book: Mapped["Book"] = relationship(lazy="selectin")
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id], lazy="selectin")
     admin: Mapped["User | None"] = relationship(foreign_keys=[admin_id], lazy="selectin")
+    library: Mapped["Library | None"] = relationship(lazy="selectin")
 
     @property
     def book_title(self) -> str | None:

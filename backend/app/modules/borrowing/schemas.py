@@ -10,7 +10,10 @@ from app.modules.borrowing.models import BorrowingStatus, ReservationStatus
 # --- Borrowing ---
 class BorrowingCreate(BaseModel):
     book_id: uuid.UUID
-    due_date: date = Field(description="İade edilmesi gereken son tarih")
+    due_date: date | None = Field(
+        default=None,
+        description="İade edilmesi gereken son tarih (boş bırakılırsa kütüphanenin max_borrow_days kuralına göre otomatik hesaplanır)",
+    )
     request_approval: bool = Field(
         default=False,
         description="True ise doğrudan aktifleşmek yerine görevli onay kuyruğuna (PENDING_BORROW) düşer",
@@ -22,6 +25,9 @@ class BorrowingRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     book_id: uuid.UUID
+    library_id: uuid.UUID | None = None
+    library_name: str | None = None
+    library_daily_fine: float | None = None
     borrow_date: date
     due_date: date
     return_date: date | None = None
@@ -52,6 +58,11 @@ class BorrowingRead(BaseModel):
 
     @model_validator(mode="after")
     def compute_dynamic_overdue(self) -> "BorrowingRead":
+        rate = (
+            float(self.library_daily_fine)
+            if self.library_daily_fine is not None
+            else float(settings.DAILY_PENALTY_RATE)
+        )
         today = date.today()
         if self.status != BorrowingStatus.RETURNED:
             if self.approval_status == "PENDING_BORROW":
@@ -60,7 +71,7 @@ class BorrowingRead(BaseModel):
                 days = (today - self.due_date).days
                 self.overdue_days = days
                 self.penalty_amount = round(
-                    days * settings.DAILY_PENALTY_RATE + float(self.damage_penalty or 0.0), 2
+                    days * rate + float(self.damage_penalty or 0.0), 2
                 )
                 self.status = BorrowingStatus.OVERDUE
             else:
@@ -72,8 +83,8 @@ class BorrowingRead(BaseModel):
                 overdue_part = max(
                     0.0, float(self.penalty_amount or 0.0) - float(self.damage_penalty or 0.0)
                 )
-                if overdue_part > 0 and settings.DAILY_PENALTY_RATE > 0:
-                    self.overdue_days = int(round(overdue_part / settings.DAILY_PENALTY_RATE))
+                if overdue_part > 0 and rate > 0:
+                    self.overdue_days = int(round(overdue_part / rate))
         return self
 
 
@@ -129,6 +140,7 @@ class StockMovementCreate(BaseModel):
 class StockMovementRead(BaseModel):
     id: uuid.UUID
     book_id: uuid.UUID
+    library_id: uuid.UUID | None = None
     book_title: str | None = None
     book_isbn: str | None = None
     user_id: uuid.UUID | None = None
@@ -206,6 +218,8 @@ class ReservationRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     book_id: uuid.UUID
+    library_id: uuid.UUID | None = None
+    library_name: str | None = None
     reservation_date: datetime
     expires_at: datetime | None = None
     turn_starts_at: datetime | None = None

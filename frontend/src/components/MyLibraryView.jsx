@@ -37,7 +37,13 @@ function formatRemainingCountdown(expiresAt, nowMs) {
   };
 }
 
-export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }) {
+export default function MyLibraryView({
+  notify,
+  onSelectBook,
+  onCatalogChanged,
+  activeLibraryId = '',
+  activeLibrary = null,
+}) {
   const [borrowings, setBorrowings] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [bookMap, setBookMap] = useState({});
@@ -51,6 +57,10 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
   const [borrowingFilter, setBorrowingFilter] = useState('active_pending'); // 'active_pending' | 'history' | 'all'
   const [borrowingPage, setBorrowingPage] = useState(1);
   const [nowMs, setNowMs] = useState(Date.now());
+
+  const maxBooksQuota = Number(activeLibrary?.max_books_per_user || 3);
+  const dailyFineRate = Number(activeLibrary?.daily_fine_amount ?? 5.0);
+  const maxBorrowDays = Number(activeLibrary?.max_borrow_days || 14);
 
   // Rezerve Kitap Ödünç Alma Modalı State'leri
   const [reserveBorrowModalItem, setReserveBorrowModalItem] = useState(null);
@@ -102,9 +112,9 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
     if (!silent) setLoading(true);
     try {
       const [borrowList, resList, booksResp] = await Promise.all([
-        api.getMyBorrowings(),
-        api.getMyReservations(),
-        api.getBooks({ page: 1, limit: 100 }),
+        api.getMyBorrowings(activeLibraryId),
+        api.getMyReservations(activeLibraryId),
+        api.getBooks({ page: 1, limit: 100, library_id: activeLibraryId || undefined }),
       ]);
 
       const map = {};
@@ -149,7 +159,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
       fetchAll(true);
     }, 10000);
     return () => clearInterval(pollTimer);
-  }, []);
+  }, [activeLibraryId]);
 
   // Live 1-second ticker for 24-hour reservation countdown & queue transition
   useEffect(() => {
@@ -391,7 +401,7 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
             </div>
             <div>
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-white/20 text-rose-100 mb-1.5">
-                GECİKME VE CEZA UYARISI (GÜNLÜK 10 TL)
+                GECİKME VE CEZA UYARISI (GÜNLÜK {dailyFineRate.toFixed(2)} TL)
               </div>
               <h2 className="text-lg sm:text-xl font-extrabold">
                 Toplam Aktif Gecikme Borcunuz: {totalActiveDebt.toFixed(2)} TL
@@ -426,12 +436,12 @@ export default function MyLibraryView({ notify, onSelectBook, onCatalogChanged }
         <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
           <div
             className={`px-3.5 py-2 rounded-xl text-xs font-bold border ${
-              activeBorrowingsCount >= 3
+              activeBorrowingsCount >= maxBooksQuota
                 ? 'bg-rose-50 text-rose-700 border-rose-200'
                 : 'bg-indigo-50 text-indigo-700 border-indigo-200'
             }`}
           >
-            Aktif Ödünç Kotası: {activeBorrowingsCount} / 3 Kitap
+            Aktif Ödünç Kotası: {activeBorrowingsCount} / {maxBooksQuota} Kitap ({activeLibrary?.name || 'Test Kütüphanesi'})
           </div>
           <button
             onClick={fetchAll}

@@ -22,6 +22,13 @@ from app.modules.catalog.models import (
     book_categories,
 )
 from app.modules.admin.models import SystemLog
+from app.modules.library.models import (
+    Library,
+    LibraryMembership,
+    LibraryStatus,
+    MembershipRole,
+    MembershipStatus,
+)
 from app.modules.review.models import Review, ReviewReaction
 
 __all__ = [
@@ -29,6 +36,7 @@ __all__ = [
     "User", "Role", "RoleName", "user_roles",
     "Publisher", "Category", "Author", "Book", "book_authors", "book_categories",
     "Borrowing", "BorrowingStatus", "Reservation", "ReservationStatus", "StockMovement",
+    "Library", "LibraryMembership", "LibraryStatus", "MembershipRole", "MembershipStatus",
     "Review", "ReviewReaction",
     "SystemLog",
 ]

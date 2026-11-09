@@ -141,8 +141,52 @@ export const api = {
     request(`/publishers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePublisher: (id) => request(`/publishers/${id}`, { method: 'DELETE' }),
 
+  // Libraries (Multi-Tenant) & System Admin
+  getLibraries: (search = '') => {
+    const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+    return request(`/libraries${qs}`);
+  },
+  getMyMemberships: () => request('/libraries/my'),
+  getMyLibraryRequests: () => request('/libraries/my-requests'),
+  createLibraryRequest: (data) =>
+    request('/libraries', { method: 'POST', body: JSON.stringify(data) }),
+  applyToLibrary: (data) =>
+    request('/libraries/apply', { method: 'POST', body: JSON.stringify(data) }),
+  getLibraryDetail: (libraryId) => request(`/libraries/${libraryId}`),
+  updateLibrarySettings: (libraryId, data) =>
+    request(`/libraries/${libraryId}/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  getLibraryMembers: (libraryId, status = '') => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request(`/libraries/${libraryId}/members${qs}`);
+  },
+  updateMembershipStatus: (libraryId, membershipId, data) =>
+    request(`/libraries/${libraryId}/members/${membershipId}/status`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateMembershipRole: (libraryId, membershipId, data) =>
+    request(`/libraries/${libraryId}/members/${membershipId}/role`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getSystemAdminLibraries: (status = '') => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request(`/system-admin/libraries${qs}`);
+  },
+  updateSystemAdminLibraryStatus: (libraryId, status) =>
+    request(`/system-admin/libraries/${libraryId}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+
   // Borrowings
-  getMyBorrowings: () => request('/borrowings'),
+  getMyBorrowings: (libraryId = '') => {
+    const qs = libraryId ? `?library_id=${encodeURIComponent(libraryId)}` : '';
+    return request(`/borrowings${qs}`);
+  },
   borrowBook: (data) =>
     request('/borrowings', { method: 'POST', body: JSON.stringify(data) }),
   returnBook: (id, data = null) =>
@@ -160,7 +204,14 @@ export const api = {
     request(`/admin/borrowings/${id}/approve-payment`, { method: 'POST' }),
 
   // Admin Borrowings, Approval Queue, Stock Movements & Overdue Simulation
-  getAdminBorrowings: () => request('/admin/borrowings'),
+  getAdminBorrowings: (libraryId = '') => {
+    const qs = libraryId ? `?library_id=${encodeURIComponent(libraryId)}` : '';
+    return request(`/admin/borrowings${qs}`);
+  },
+  getAdminDashboard: (libraryId = '') => {
+    const qs = libraryId ? `?library_id=${encodeURIComponent(libraryId)}` : '';
+    return request(`/admin/dashboard${qs}`);
+  },
   approveBorrow: (id, data = {}) =>
     request(`/admin/borrowings/${id}/approve-borrow`, {
       method: 'POST',
@@ -180,6 +231,7 @@ export const api = {
     const searchParams = new URLSearchParams();
     if (params.condition) searchParams.set('condition', params.condition);
     if (params.book_id) searchParams.set('book_id', params.book_id);
+    if (params.library_id) searchParams.set('library_id', params.library_id);
     if (params.limit) searchParams.set('limit', String(params.limit));
     const qs = searchParams.toString();
     return request(`/admin/stock-movements${qs ? `?${qs}` : ''}`);
@@ -191,8 +243,14 @@ export const api = {
     }),
   simulateOverdue: (id) =>
     request(`/admin/borrowings/${id}/simulate-overdue`, { method: 'PATCH' }),
-  getUnpaidPenalties: () => request('/admin/unpaid-penalties'),
-  getAdminUsers: () => request('/admin/users'),
+  getUnpaidPenalties: (libraryId = '') => {
+    const qs = libraryId ? `?library_id=${encodeURIComponent(libraryId)}` : '';
+    return request(`/admin/unpaid-penalties${qs}`);
+  },
+  getAdminUsers: (libraryId = '') => {
+    const qs = libraryId ? `?library_id=${encodeURIComponent(libraryId)}` : '';
+    return request(`/admin/users${qs}`);
+  },
   banUser: (userId, data = {}) =>
     request(`/admin/users/${userId}/ban`, {
       method: 'POST',
@@ -216,7 +274,10 @@ export const api = {
   getNotifications: () => request('/notifications'),
 
   // Reservations
-  getMyReservations: () => request('/reservations'),
+  getMyReservations: (libraryId = '') => {
+    const qs = libraryId ? `?library_id=${encodeURIComponent(libraryId)}` : '';
+    return request(`/reservations${qs}`);
+  },
   createReservation: (data) =>
     request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
   cancelReservation: (id) =>

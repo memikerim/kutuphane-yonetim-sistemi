@@ -45,6 +45,111 @@ export default function App() {
     filter: 'ALL',
   });
 
+  // Çoklu Kütüphane (Multi-Tenant) State'leri
+  const [allPublicLibraries, setAllPublicLibraries] = useState([]);
+  const [myMemberships, setMyMemberships] = useState([]);
+  const [myLibraryRequests, setMyLibraryRequests] = useState([]);
+  const [activeLibraryId, setActiveLibraryId] = useState(
+    () => localStorage.getItem('active_library_id') || ''
+  );
+
+  // Kütüphaneye Katılma / Yeni Kütüphane Oluşturma Modalı State'leri
+  const [libraryModalMode, setLibraryModalMode] = useState(null); // null | 'apply' | 'create'
+  const [applyForm, setApplyForm] = useState({
+    library_name: '',
+    phone: '',
+    identity_or_student_no: '',
+    department_or_address: '',
+    application_note: '',
+  });
+  const [applySubmitting, setApplySubmitting] = useState(false);
+  const [applySuccessMessage, setApplySuccessMessage] = useState('');
+
+  const [createLibForm, setCreateLibForm] = useState({
+    name: '',
+    description: '',
+    daily_fine_amount: 5.0,
+    max_borrow_days: 14,
+    max_books_per_user: 3,
+    penalty_rules_text:
+      'Kitaplar zamanında teslim edilmelidir. Geciken her gün için kütüphanenin belirlediği günlük gecikme cezası uygulanır.',
+  });
+  const [createLibSubmitting, setCreateLibSubmitting] = useState(false);
+  const [createLibSuccessBanner, setCreateLibSuccessBanner] = useState('');
+
+  const isSystemAdmin = Boolean(
+    user?.is_system_admin ||
+      user?.roles?.includes('SYSTEM_ADMIN') ||
+      user?.roles?.includes('ADMIN')
+  );
+
+  // Kullanıcının erişebileceği onaylı kütüphaneler listesi
+  const approvedLibraries = React.useMemo(() => {
+    if (!user) {
+      return allPublicLibraries;
+    }
+    if (isSystemAdmin) {
+      return allPublicLibraries.map((lib) => ({
+        ...lib,
+        membership_role: 'LIBRARY_ADMIN',
+        membership_status: 'APPROVED',
+      }));
+    }
+    return (myMemberships || [])
+      .filter((m) => m.status === 'APPROVED')
+      .map((m) => {
+        const pub = allPublicLibraries.find((l) => String(l.id) === String(m.library_id));
+        return {
+          id: m.library_id,
+          name: m.library_name || pub?.name || 'Kütüphane',
+          description: pub?.description || '',
+          daily_fine_amount: m.library_daily_fine_amount ?? pub?.daily_fine_amount ?? 5.0,
+          max_borrow_days: m.library_max_borrow_days ?? pub?.max_borrow_days ?? 14,
+          max_books_per_user: m.library_max_books_per_user ?? pub?.max_books_per_user ?? 3,
+          penalty_rules_text: pub?.penalty_rules_text || '',
+          membership_role: m.role,
+          membership_status: m.status,
+        };
+      });
+  }, [user, isSystemAdmin, allPublicLibraries, myMemberships]);
+
+  const activeLibrary = React.useMemo(() => {
+    if (approvedLibraries.length === 0) return null;
+    return (
+      approvedLibraries.find((l) => String(l.id) === String(activeLibraryId)) ||
+      approvedLibraries[0]
+    );
+  }, [approvedLibraries, activeLibraryId]);
+
+  useEffect(() => {
+    if (activeLibrary && String(activeLibrary.id) !== String(activeLibraryId)) {
+      setActiveLibraryId(String(activeLibrary.id));
+      localStorage.setItem('active_library_id', String(activeLibrary.id));
+    } else if (!activeLibrary && user && !isSystemAdmin && approvedLibraries.length === 0) {
+      setActiveLibraryId('');
+    }
+  }, [activeLibrary, activeLibraryId, user, isSystemAdmin, approvedLibraries.length]);
+
+  const handleSelectLibrary = (libId) => {
+    setActiveLibraryId(String(libId));
+    localStorage.setItem('active_library_id', String(libId));
+    setPage(1);
+  };
+
+  const isActiveLibraryAdmin = Boolean(
+    isSystemAdmin || activeLibrary?.membership_role === 'LIBRARY_ADMIN'
+  );
+  const canAccessAdmin = Boolean(
+    isSystemAdmin ||
+      isActiveLibraryAdmin ||
+      (myMemberships || []).some(
+        (m) => m.status === 'APPROVED' && m.role === 'LIBRARY_ADMIN'
+      )
+  );
+  const userHasApprovedLibrary = Boolean(
+    !user || isSystemAdmin || approvedLibraries.length > 0
+  );
+
   // Bildirimler & Aksiyon Merkezi State
   const [notifications, setNotifications] = useState({
     total_count: 0,
@@ -97,14 +202,40 @@ export default function App() {
     }
   }, []);
 
-  const fetchMyActiveBorrowings = useCallback(async () => {
+  const fetchLibrariesAndMemberships = useCallback(async () => {
+    try {
+      const pubLibs = await api.getLibraries().catch(() => []);
+      setAllPublicLibraries(pubLibs || []);
+      if (pubLibs?.length > 0 && !applyForm.library_name) {
+        setApplyForm((prev) => ({
+          ...prev,
+          library_name: prev.library_name || pubLibs[0].name,
+        }));
+      }
+      if (getToken()) {
+        const [mems, reqs] = await Promise.all([
+          api.getMyMemberships().catch(() => []),
+          api.getMyLibraryRequests().catch(() => []),
+        ]);
+        setMyMemberships(mems || []);
+        setMyLibraryRequests(reqs || []);
+      } else {
+        setMyMemberships([]);
+        setMyLibraryRequests([]);
+      }
+    } catch {
+      // ignore
+    }
+  }, [applyForm.library_name]);
+
+  const fetchMyActiveBorrowings = useCallback(async (libId = activeLibrary?.id) => {
     const token = getToken();
     if (!token) {
       setMyActiveBorrowings([]);
       return;
     }
     try {
-      const list = await api.getMyBorrowings();
+      const list = await api.getMyBorrowings(libId || '');
       const active = (list || []).filter(
         (b) => b.status !== 'RETURNED' && b.approval_status !== 'REJECTED'
       );
@@ -112,7 +243,7 @@ export default function App() {
     } catch {
       setMyActiveBorrowings([]);
     }
-  }, []);
+  }, [activeLibrary?.id]);
 
   const checkAndTriggerAccountAlert = useCallback((me) => {
     if (!me) return;
@@ -127,15 +258,24 @@ export default function App() {
   }, []);
 
   const refreshCurrentUser = useCallback(async (showPopup = false) => {
+    await fetchLibrariesAndMemberships();
     const token = getToken();
     if (!token) return;
     try {
       const me = await api.getMe();
       setUser(me);
+      if (Array.isArray(me?.memberships)) {
+        setMyMemberships(me.memberships);
+      }
       fetchMyActiveBorrowings();
       if (showPopup) {
         checkAndTriggerAccountAlert(me);
-        if (me?.roles?.includes('ADMIN')) {
+        const isAdminRole =
+          me?.is_system_admin ||
+          me?.roles?.includes('SYSTEM_ADMIN') ||
+          me?.roles?.includes('ADMIN') ||
+          me?.roles?.includes('LIBRARY_ADMIN');
+        if (isAdminRole) {
           fetchNotifications(true);
         } else {
           fetchNotifications(false);
@@ -146,7 +286,12 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [checkAndTriggerAccountAlert, fetchNotifications, fetchMyActiveBorrowings]);
+  }, [
+    checkAndTriggerAccountAlert,
+    fetchNotifications,
+    fetchMyActiveBorrowings,
+    fetchLibrariesAndMemberships,
+  ]);
 
   // Toast notifications
   const [toasts, setToasts] = useState([]);
@@ -230,10 +375,16 @@ export default function App() {
     fetchFilterMetadata();
   }, [fetchFilterMetadata]);
 
-  // Load paginated & filtered books
+  // Load paginated & filtered books (scoped to activeLibrary)
   const fetchBooks = useCallback(async () => {
+    if (user && !isSystemAdmin && approvedLibraries.length === 0) {
+      setBooksData({ items: [], total: 0, page: 1, limit: 8, total_pages: 1 });
+      setLoadingBooks(false);
+      return;
+    }
     setLoadingBooks(true);
     try {
+      const targetLibId = activeLibrary?.id || activeLibraryId || undefined;
       const res = await api.getBooks({
         page,
         limit,
@@ -241,6 +392,7 @@ export default function App() {
         category: categoryFilter || undefined,
         author: authorFilter || undefined,
         publisher: publisherFilter || undefined,
+        library_id: targetLibId,
         sortBy,
         sortOrder,
       });
@@ -253,6 +405,11 @@ export default function App() {
       setLoadingBooks(false);
     }
   }, [
+    user,
+    isSystemAdmin,
+    approvedLibraries.length,
+    activeLibrary?.id,
+    activeLibraryId,
     page,
     limit,
     search,
@@ -373,8 +530,89 @@ export default function App() {
     setToken(null);
     setUser(null);
     setMyActiveBorrowings([]);
+    setMyMemberships([]);
+    setMyLibraryRequests([]);
     setActiveTab('catalog');
     notify('Oturumunuz güvenli bir şekilde kapatıldı.', 'info');
+  };
+
+  // Kütüphane İsmi ile Katılma Başvurusu Gönder
+  const handleApplyToLibrarySubmit = async (e) => {
+    e.preventDefault();
+    if (!applyForm.library_name.trim()) {
+      notify('Lütfen katılmak istediğiniz kütüphanenin adını girin veya seçin.', 'error');
+      return;
+    }
+    if (
+      !applyForm.phone.trim() ||
+      !applyForm.identity_or_student_no.trim() ||
+      !applyForm.department_or_address.trim()
+    ) {
+      notify('Lütfen Telefon, Öğrenci/Kurum/TC No ve Bölüm/Adres bilgilerini eksiksiz girin.', 'error');
+      return;
+    }
+    setApplySubmitting(true);
+    setApplySuccessMessage('');
+    try {
+      const res = await api.applyToLibrary({
+        library_name: applyForm.library_name.trim(),
+        phone: applyForm.phone.trim(),
+        identity_or_student_no: applyForm.identity_or_student_no.trim(),
+        department_or_address: applyForm.department_or_address.trim(),
+        application_note: applyForm.application_note.trim() || undefined,
+      });
+      const msg = `"${res?.library_name || applyForm.library_name}" kütüphanesine katılma başvurunuz kütüphane yöneticisinin onayına (PENDING) gönderilmiştir.`;
+      setApplySuccessMessage(msg);
+      notify(msg, 'success');
+      setApplyForm((prev) => ({
+        ...prev,
+        application_note: '',
+      }));
+      await refreshCurrentUser(false);
+    } catch (err) {
+      notify(err.message || 'Kütüphane katılım başvurusu gönderilemedi', 'error');
+    } finally {
+      setApplySubmitting(false);
+    }
+  };
+
+  // Yeni Kütüphane Oluşturma Talebi Gönder
+  const handleCreateLibraryRequestSubmit = async (e) => {
+    e.preventDefault();
+    if (!createLibForm.name.trim()) {
+      notify('Lütfen oluşturulacak kütüphanenin adını girin.', 'error');
+      return;
+    }
+    setCreateLibSubmitting(true);
+    setCreateLibSuccessBanner('');
+    try {
+      await api.createLibraryRequest({
+        name: createLibForm.name.trim(),
+        description: createLibForm.description.trim() || null,
+        daily_fine_amount: Number(createLibForm.daily_fine_amount || 5.0),
+        max_borrow_days: Number(createLibForm.max_borrow_days || 14),
+        max_books_per_user: Number(createLibForm.max_books_per_user || 3),
+        penalty_rules_text: createLibForm.penalty_rules_text.trim() || null,
+      });
+      const exactNotice =
+        'Kütüphane oluşturma talebiniz Sistem Yöneticisi onayına gönderilmiştir. Onaylandığında bu kütüphanenin yöneticisi olacaksınız.';
+      setCreateLibSuccessBanner(exactNotice);
+      notify(exactNotice, 'success');
+      setCreateLibForm({
+        name: '',
+        description: '',
+        daily_fine_amount: 5.0,
+        max_borrow_days: 14,
+        max_books_per_user: 3,
+        penalty_rules_text:
+          'Kitaplar zamanında teslim edilmelidir. Geciken her gün için kütüphanenin belirlediği günlük gecikme cezası uygulanır.',
+      });
+      await refreshCurrentUser(false);
+    } catch (err) {
+      notify(err.message || 'Kütüphane oluşturma talebi gönderilemedi', 'error');
+    } finally {
+      setCreateLibSubmitting(false);
+    }
   };
 
   const activeFilterCount = [
@@ -396,6 +634,18 @@ export default function App() {
         notifications={notifications}
         onNotificationAction={handleNotificationAction}
         onDismissNotification={handleDismissNotification}
+        approvedLibraries={approvedLibraries}
+        activeLibraryId={activeLibrary?.id || activeLibraryId}
+        activeLibrary={activeLibrary}
+        onSelectLibrary={handleSelectLibrary}
+        onOpenLibraryModal={(mode) => {
+          setApplySuccessMessage('');
+          setCreateLibSuccessBanner('');
+          setLibraryModalMode(mode);
+        }}
+        canAccessAdmin={canAccessAdmin}
+        isSystemAdmin={isSystemAdmin}
+        isActiveLibraryAdmin={isActiveLibraryAdmin}
       />
 
       {/* Üst Hesap Kısıtlama (Ban) veya Gecikme / Hasar-Kayıp Borç Bilgi Çubuğu */}
@@ -453,21 +703,469 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {activeTab === 'catalog' && (
           <div className="space-y-6">
-            {/* Hero Banner */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-violet-900 text-white p-6 sm:p-8 shadow-lg">
-              <div className="relative z-10 max-w-2xl space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 backdrop-blur-xs text-indigo-100">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  Dijital Katalog & Akıllı Rezervasyon Sistemi
+            {user && !userHasApprovedLibrary ? (
+              /* Yeni Kayıt Olan ve Henüz Hiçbir Kütüphanede Onaylı (APPROVED) Üyeliği Bulunmayan Kullanıcı Karşılama Ekranı */
+              <div className="space-y-6">
+                <div className="rounded-3xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-violet-900 text-white p-6 sm:p-10 shadow-xl border border-indigo-700">
+                  <div className="max-w-3xl space-y-3">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-amber-400 text-slate-950">
+                      <Building2 className="w-3.5 h-3.5" />
+                      ÇOKLU KÜTÜPHANE MİMARİSİ — HOŞ GELDİNİZ
+                    </span>
+                    <h1 className="text-2xl sm:text-3xl font-extrabold leading-tight">
+                      Katalogları görüntülemek ve kitap ödünç alabilmek için bir kütüphaneye katılmanız gerekmektedir.
+                    </h1>
+                    <p className="text-xs sm:text-sm text-indigo-100 leading-relaxed">
+                      Merhaba <strong>{user.first_name} {user.last_name}</strong>, sistemimizde her kütüphane bağımsız katalog ve ödünç kurallarıyla çalışmaktadır. Aşağıdan kütüphane ismi ile arama yaparak mevcut bir kütüphaneye katılma başvurusu yapabilir veya kendi kütüphanenizi oluşturmak için Sistem Yöneticisi onayına talep gönderebilirsiniz.
+                    </p>
+                  </div>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-                  Kütüphane Kataloğunu Keşfedin
-                </h1>
-                <p className="text-xs sm:text-sm text-indigo-100/90 leading-relaxed">
-                  Kitapları başlık, yazar, kategori veya yayınevine göre filtreleyin; stokta olan eserleri anında ödünç alın veya tükenen kitaplar için rezervasyon sırasına girin.
-                </p>
+
+                {/* Kullanıcının Bekleyen Başvuruları ve Kütüphane Kurulum Talepleri Özeti */}
+                {(myMemberships.length > 0 || myLibraryRequests.length > 0) && (
+                  <div className="bg-white rounded-3xl p-5 sm:p-6 border border-indigo-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-indigo-600" />
+                        Mevcut Kütüphane Başvurularınız & Kurulum Talepleriniz
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => refreshCurrentUser(false)}
+                        className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold cursor-pointer"
+                      >
+                        Durumu Kontrol Et / Yenile
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {myMemberships.map((m) => (
+                        <div
+                          key={m.id}
+                          className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div>
+                            <span className="font-extrabold text-slate-900 text-sm block">
+                              {m.library_name || 'Kütüphane'}
+                            </span>
+                            <span className="text-slate-500">
+                              Katılım Başvurusu • Öğrenci/TC: {m.identity_or_student_no || '-'}
+                            </span>
+                            {m.ban_reason && (
+                              <p className="text-rose-700 font-semibold mt-1">
+                                Ban Notu: "{m.ban_reason}"
+                              </p>
+                            )}
+                          </div>
+                          <span
+                            className={`px-2.5 py-1 rounded-full font-extrabold shrink-0 ${
+                              m.status === 'PENDING'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : m.status === 'BANNED'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {m.status === 'PENDING'
+                              ? 'Yönetici Onayı Bekliyor'
+                              : m.status === 'BANNED'
+                              ? 'Banlı (Kısıtlı)'
+                              : 'Reddedildi'}
+                          </span>
+                        </div>
+                      ))}
+
+                      {myLibraryRequests.map((req) => (
+                        <div
+                          key={req.id}
+                          className="p-4 rounded-2xl bg-violet-50/70 border border-violet-200 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div>
+                            <span className="font-extrabold text-violet-950 text-sm block">
+                              {req.name} (Yeni Kütüphane Kurulum Talebi)
+                            </span>
+                            <span className="text-violet-700">
+                              Günlük Ceza: {req.daily_fine_amount} TL • Ödünç: {req.max_borrow_days} Gün
+                            </span>
+                          </div>
+                          <span
+                            className={`px-2.5 py-1 rounded-full font-extrabold shrink-0 ${
+                              req.status === 'PENDING'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : req.status === 'APPROVED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {req.status === 'PENDING'
+                              ? 'Sistem Yöneticisi Onayında'
+                              : req.status === 'APPROVED'
+                              ? 'Onaylandı'
+                              : 'Reddedildi'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* İki Sütunlu Başvuru ve Yeni Kütüphane Oluşturma Kartları */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* 1. Kütüphane İsmi ile Arama ve Katılma Başvurusu Formu */}
+                  <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
+                    <div>
+                      <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-indigo-100 text-indigo-800 mb-1">
+                        ADIM 1 • MEVCUT KÜTÜPHANEYE KATILIM
+                      </span>
+                      <h2 className="text-lg font-extrabold text-slate-900">
+                        Kütüphane İsmiyle Katılma Başvurusu Yapın
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Katılmak istediğiniz kütüphanenin adını arayın veya listeden seçin; başvuru bilgileriniz ilgili kütüphane yöneticisinin onayına düşecektir.
+                      </p>
+                    </div>
+
+                    {applySuccessMessage && (
+                      <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <span>{applySuccessMessage}</span>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleApplyToLibrarySubmit} className="space-y-3.5">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Kütüphane İsmi (Arama / Seçim) *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={applyForm.library_name}
+                          onChange={(e) =>
+                            setApplyForm((prev) => ({ ...prev, library_name: e.target.value }))
+                          }
+                          placeholder="Örn: Test Kütüphanesi"
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {allPublicLibraries.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span className="text-[11px] text-slate-400 font-semibold">
+                              Aktif Kütüphaneler:
+                            </span>
+                            {allPublicLibraries.map((lib) => (
+                              <button
+                                key={lib.id}
+                                type="button"
+                                onClick={() =>
+                                  setApplyForm((prev) => ({ ...prev, library_name: lib.name }))
+                                }
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                                  applyForm.library_name.trim().toLowerCase() ===
+                                  lib.name.toLowerCase()
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                                }`}
+                              >
+                                {lib.name} ({lib.max_borrow_days} gün / {lib.daily_fine_amount} TL)
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Telefon Numarası *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={applyForm.phone}
+                            onChange={(e) =>
+                              setApplyForm((prev) => ({ ...prev, phone: e.target.value }))
+                            }
+                            placeholder="Örn: 0555 123 45 67"
+                            className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Öğrenci / Kurum / TC No *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={applyForm.identity_or_student_no}
+                            onChange={(e) =>
+                              setApplyForm((prev) => ({
+                                ...prev,
+                                identity_or_student_no: e.target.value,
+                              }))
+                            }
+                            placeholder="Örn: 20261045 veya TC No"
+                            className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Bölüm / Fakülte veya Adres Bilgisi *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={applyForm.department_or_address}
+                          onChange={(e) =>
+                            setApplyForm((prev) => ({
+                              ...prev,
+                              department_or_address: e.target.value,
+                            }))
+                          }
+                          placeholder="Örn: Bilgisayar Mühendisliği Bölümü / Merkez Kampüs"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Katılım Notu (İsteğe Bağlı)
+                        </label>
+                        <input
+                          type="text"
+                          value={applyForm.application_note}
+                          onChange={(e) =>
+                            setApplyForm((prev) => ({
+                              ...prev,
+                              application_note: e.target.value,
+                            }))
+                          }
+                          placeholder="Kütüphane yöneticisine iletmek istediğiniz not..."
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={applySubmitting}
+                        className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm shadow-sm cursor-pointer transition-colors"
+                      >
+                        {applySubmitting
+                          ? 'Başvuru Gönderiliyor...'
+                          : 'Kütüphaneye Katılma Başvurusu Gönder'}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* 2. Yeni Kütüphane Oluşturma Talebi Formu */}
+                  <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
+                    <div>
+                      <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-violet-100 text-violet-800 mb-1">
+                        ALTERNATİF • YENİ KÜTÜPHANE KURULUMU
+                      </span>
+                      <h2 className="text-lg font-extrabold text-slate-900">
+                        Yeni Bir Kütüphane Oluşturma Talebinde Bulunun
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Kendi kurumunuz veya topluluğunuz için özel ödünç ve ceza kurallarına sahip yeni bir kütüphane oluşturabilirsiniz.
+                      </p>
+                    </div>
+
+                    {createLibSuccessBanner && (
+                      <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-400 text-amber-950 text-xs sm:text-sm font-extrabold flex items-start gap-2.5">
+                        <CheckCircle2 className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                        <span>{createLibSuccessBanner}</span>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleCreateLibraryRequestSubmit} className="space-y-3.5">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Yeni Kütüphane Adı (Benzersiz) *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={createLibForm.name}
+                          onChange={(e) =>
+                            setCreateLibForm((prev) => ({ ...prev, name: e.target.value }))
+                          }
+                          placeholder="Örn: Mühendislik Fakültesi Kütüphanesi"
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Kütüphane Açıklaması
+                        </label>
+                        <input
+                          type="text"
+                          value={createLibForm.description}
+                          onChange={(e) =>
+                            setCreateLibForm((prev) => ({
+                              ...prev,
+                              description: e.target.value,
+                            }))
+                          }
+                          placeholder="Kütüphane hakkında kısa bilgi..."
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            Günlük Ceza (TL)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            required
+                            value={createLibForm.daily_fine_amount}
+                            onChange={(e) =>
+                              setCreateLibForm((prev) => ({
+                                ...prev,
+                                daily_fine_amount: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            Ödünç Süresi (Gün)
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="365"
+                            required
+                            value={createLibForm.max_borrow_days}
+                            onChange={(e) =>
+                              setCreateLibForm((prev) => ({
+                                ...prev,
+                                max_borrow_days: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            Kitap Limiti
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            required
+                            value={createLibForm.max_books_per_user}
+                            onChange={(e) =>
+                              setCreateLibForm((prev) => ({
+                                ...prev,
+                                max_books_per_user: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Başlangıç Ceza ve Ödünç Kuralları Metni
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={createLibForm.penalty_rules_text}
+                          onChange={(e) =>
+                            setCreateLibForm((prev) => ({
+                              ...prev,
+                              penalty_rules_text: e.target.value,
+                            }))
+                          }
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={createLibSubmitting}
+                        className="w-full py-2.5 px-4 rounded-xl bg-violet-700 hover:bg-violet-800 disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm shadow-sm cursor-pointer transition-colors"
+                      >
+                        {createLibSubmitting
+                          ? 'Talep Gönderiliyor...'
+                          : 'Yeni Kütüphane Oluşturma Talebi Gönder'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                {/* Hero Banner */}
+                <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-violet-900 text-white p-6 sm:p-8 shadow-lg">
+                  <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="max-w-2xl space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 backdrop-blur-xs text-indigo-100">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          Dijital Katalog & Akıllı Rezervasyon Sistemi
+                        </span>
+                        {activeLibrary && (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-400 text-slate-950">
+                            <Building2 className="w-3.5 h-3.5" />
+                            Aktif Kütüphane: {activeLibrary.name}
+                          </span>
+                        )}
+                      </div>
+                      <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                        {activeLibrary
+                          ? `${activeLibrary.name} Kataloğunu Keşfedin`
+                          : 'Kütüphane Kataloğunu Keşfedin'}
+                      </h1>
+                      <p className="text-xs sm:text-sm text-indigo-100/90 leading-relaxed">
+                        {activeLibrary
+                          ? `Bu kütüphanede ödünç teslim süresi ${
+                              activeLibrary.max_borrow_days || 14
+                            } gün, gecikme durumunda günlük ceza ${Number(
+                              activeLibrary.daily_fine_amount ?? 5
+                            ).toFixed(2)} TL ve kişi başı aktif kitap limiti ${
+                              activeLibrary.max_books_per_user || 3
+                            } adettir.`
+                          : 'Kitapları başlık, yazar, kategori veya yayınevine göre filtreleyin; stokta olan eserleri anında ödünç alın veya tükenen kitaplar için rezervasyon sırasına girin.'}
+                      </p>
+                    </div>
+
+                    {user && (
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setApplySuccessMessage('');
+                            setLibraryModalMode('apply');
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold border border-white/20 cursor-pointer transition-colors"
+                        >
+                          + Başka Kütüphaneye Katıl
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCreateLibSuccessBanner('');
+                            setLibraryModalMode('create');
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold cursor-pointer transition-colors"
+                        >
+                          + Yeni Kütüphane Oluştur
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
             {/* Kullanıcı Aktif Kitaplarım Bölümü (Ana Sayfa) */}
             {user && myActiveBorrowings.length > 0 && (
@@ -1006,12 +1704,16 @@ export default function App() {
                 </button>
               </div>
             )}
+              </>
+            )}
           </div>
         )}
 
         {activeTab === 'mylibrary' && user && (
           <MyLibraryView
             notify={notify}
+            activeLibraryId={activeLibrary?.id || activeLibraryId}
+            activeLibrary={activeLibrary}
             onSelectBook={(b) => setSelectedBook(b)}
             onCatalogChanged={() => {
               fetchBooks();
@@ -1022,11 +1724,18 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'admin' && user?.roles?.includes('ADMIN') && (
+        {activeTab === 'admin' && canAccessAdmin && (
           <AdminPanel
             notify={notify}
             initialSubTab={adminNavTarget.subTab}
             initialFilter={adminNavTarget.filter}
+            activeLibraryId={activeLibrary?.id || activeLibraryId}
+            activeLibrary={activeLibrary}
+            isSystemAdmin={isSystemAdmin}
+            user={user}
+            onLibrariesChanged={() => {
+              refreshCurrentUser(false);
+            }}
             onSelectBook={(b) => setSelectedBook(b)}
             onCatalogChanged={() => {
               sessionStorage.removeItem('kutuphane_metadata');
@@ -1039,6 +1748,337 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Kütüphaneye Katılma Başvurusu / Yeni Kütüphane Oluşturma Modalı */}
+      {libraryModalMode && user && (
+        <div className="fixed inset-0 z-[9985] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLibraryModalMode('apply')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer transition-colors ${
+                    libraryModalMode === 'apply'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-200/70 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Kütüphaneye Katıl
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLibraryModalMode('create')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer transition-colors ${
+                    libraryModalMode === 'create'
+                      ? 'bg-violet-700 text-white'
+                      : 'bg-slate-200/70 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Yeni Kütüphane Oluştur
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLibraryModalMode(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {libraryModalMode === 'apply' ? (
+              <form onSubmit={handleApplyToLibrarySubmit} className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Kütüphane İsmiyle Katılma Başvurusu
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Katılmak istediğiniz kütüphanenin adını girin veya aşağıdan seçin. Başvurunuz kütüphane yöneticisinin onayına (PENDING) iletilecektir.
+                  </p>
+                </div>
+
+                {applySuccessMessage && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>{applySuccessMessage}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kütüphane İsmi *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={applyForm.library_name}
+                    onChange={(e) =>
+                      setApplyForm((prev) => ({ ...prev, library_name: e.target.value }))
+                    }
+                    placeholder="Örn: Test Kütüphanesi"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  {allPublicLibraries.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      {allPublicLibraries.map((lib) => (
+                        <button
+                          key={lib.id}
+                          type="button"
+                          onClick={() =>
+                            setApplyForm((prev) => ({ ...prev, library_name: lib.name }))
+                          }
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer ${
+                            applyForm.library_name.trim().toLowerCase() ===
+                            lib.name.toLowerCase()
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                          }`}
+                        >
+                          {lib.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Telefon No *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={applyForm.phone}
+                      onChange={(e) =>
+                        setApplyForm((prev) => ({ ...prev, phone: e.target.value }))
+                      }
+                      placeholder="0555 123 45 67"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Öğrenci / Kurum / TC No *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={applyForm.identity_or_student_no}
+                      onChange={(e) =>
+                        setApplyForm((prev) => ({
+                          ...prev,
+                          identity_or_student_no: e.target.value,
+                        }))
+                      }
+                      placeholder="Öğrenci veya TC No"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Bölüm / Adres *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={applyForm.department_or_address}
+                    onChange={(e) =>
+                      setApplyForm((prev) => ({
+                        ...prev,
+                        department_or_address: e.target.value,
+                      }))
+                    }
+                    placeholder="Bölüm veya açık adres"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Katılım Notu (İsteğe Bağlı)
+                  </label>
+                  <input
+                    type="text"
+                    value={applyForm.application_note}
+                    onChange={(e) =>
+                      setApplyForm((prev) => ({
+                        ...prev,
+                        application_note: e.target.value,
+                      }))
+                    }
+                    placeholder="Yöneticiye notunuz..."
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setLibraryModalMode(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Kapat
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={applySubmitting}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-extrabold cursor-pointer"
+                  >
+                    {applySubmitting ? 'Gönderiliyor...' : 'Katılma Başvurusu Gönder'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleCreateLibraryRequestSubmit} className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Yeni Kütüphane Oluşturma Talebi
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Kütüphane adı, açıklama ve başlangıç ceza/ödünç kurallarını belirleyerek Sistem Yöneticisi onayına gönderin.
+                  </p>
+                </div>
+
+                {createLibSuccessBanner && (
+                  <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-400 text-amber-950 text-xs font-extrabold flex items-start gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                    <span>{createLibSuccessBanner}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kütüphane Adı *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={createLibForm.name}
+                    onChange={(e) =>
+                      setCreateLibForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    placeholder="Örn: Merkez Araştırma Kütüphanesi"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Açıklama
+                  </label>
+                  <input
+                    type="text"
+                    value={createLibForm.description}
+                    onChange={(e) =>
+                      setCreateLibForm((prev) => ({ ...prev, description: e.target.value }))
+                    }
+                    placeholder="Kütüphane açıklaması..."
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Günlük Ceza (TL)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      required
+                      value={createLibForm.daily_fine_amount}
+                      onChange={(e) =>
+                        setCreateLibForm((prev) => ({
+                          ...prev,
+                          daily_fine_amount: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Ödünç Günü
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      required
+                      value={createLibForm.max_borrow_days}
+                      onChange={(e) =>
+                        setCreateLibForm((prev) => ({
+                          ...prev,
+                          max_borrow_days: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Kitap Limiti
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      required
+                      value={createLibForm.max_books_per_user}
+                      onChange={(e) =>
+                        setCreateLibForm((prev) => ({
+                          ...prev,
+                          max_books_per_user: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Ceza ve Ödünç Kuralları Metni
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={createLibForm.penalty_rules_text}
+                    onChange={(e) =>
+                      setCreateLibForm((prev) => ({
+                        ...prev,
+                        penalty_rules_text: e.target.value,
+                      }))
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setLibraryModalMode(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Kapat
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={createLibSubmitting}
+                    className="px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 disabled:opacity-60 text-white text-xs font-extrabold cursor-pointer"
+                  >
+                    {createLibSubmitting ? 'Gönderiliyor...' : 'Onaya Gönder'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200/80 py-5 mt-12">
@@ -1054,9 +2094,10 @@ export default function App() {
           onClose={() => setAuthModalMode(null)}
           onSuccess={(loggedInUser) => {
             setUser(loggedInUser);
-            checkAndTriggerAccountAlert(loggedInUser);
-            fetchNotifications(Boolean(loggedInUser?.roles?.includes('ADMIN')));
-            fetchMyActiveBorrowings();
+            if (Array.isArray(loggedInUser?.memberships)) {
+              setMyMemberships(loggedInUser.memberships);
+            }
+            refreshCurrentUser(true);
           }}
           notify={notify}
         />

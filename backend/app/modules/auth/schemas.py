@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
 from app.modules.auth.models import RoleName
+from app.modules.library.schemas import LibraryMembershipRead
 
 NameStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
@@ -91,6 +92,8 @@ class UserRead(BaseModel):
     last_name: str
     created_at: datetime
     roles: list[RoleName]
+    is_system_admin: bool = False
+    memberships: list[LibraryMembershipRead] = Field(default_factory=list)
     is_banned: bool = False
     ban_reason: str | None = None
     banned_at: datetime | None = None

@@ -4,8 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.database import DbSession
-from app.modules.auth.dependencies import require_roles
-from app.modules.auth.models import RoleName
+from app.modules.auth.dependencies import OptionalCurrentUser, require_roles
+from app.modules.auth.models import RoleName, User
 from app.modules.borrowing import service as borrowing_service
 from app.modules.borrowing.schemas import BookHistoryResponse
 from app.modules.catalog import service
@@ -31,7 +31,7 @@ from app.modules.catalog.schemas import (
 router = APIRouter(tags=["Catalog"])
 
 # Tüm yazma işlemleri için ortak Admin dependency
-AdminDep = Annotated[None, Depends(require_roles([RoleName.ADMIN]))]
+AdminDep = Annotated[User, Depends(require_roles([RoleName.ADMIN]))]
 
 
 def handle_service_error(func, *args, **kwargs):
@@ -40,6 +40,8 @@ def handle_service_error(func, *args, **kwargs):
         return func(*args, **kwargs)
     except service.NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except service.ForbiddenError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
     except service.DuplicateError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
@@ -126,16 +128,19 @@ def delete_author(id: uuid.UUID, db: DbSession, admin: AdminDep):
 @router.get("/books", response_model=PaginatedBooksResponse, summary="Kitapları listele, ara, filtrele ve sayfala")
 def get_books(
     db: DbSession,
+    current_user: OptionalCurrentUser = None,
     page: int = Query(1, ge=1, description="Sayfa numarası"),
     limit: int = Query(10, ge=1, le=100, description="Sayfa başına kayıt sayısı"),
     search: str | None = Query(None, description="Kitap başlığında arama"),
     category: str | None = Query(None, description="Kategori adına göre filtreleme"),
     author: str | None = Query(None, description="Yazar adına göre filtreleme"),
     publisher: str | None = Query(None, description="Yayınevi adına göre filtreleme"),
+    library_id: uuid.UUID | None = Query(None, description="Seçili kütüphane ID filtresi"),
     sortBy: str = Query("title", description="Sıralanacak alan (title, published_year, stock_count, isbn)"),
     sortOrder: str = Query("asc", pattern="^(asc|desc)$", description="Sıralama yönü (asc, desc)"),
 ):
-    return service.get_books(
+    return handle_service_error(
+        service.get_books,
         db=db,
         page=page,
         limit=limit,
@@ -145,6 +150,8 @@ def get_books(
         publisher=publisher,
         sort_by=sortBy,
         sort_order=sortOrder,
+        library_id=library_id,
+        current_user=current_user,
     )
 
 
@@ -191,14 +198,14 @@ def get_book_history(id: uuid.UUID, db: DbSession):
 
 @router.post("/books", response_model=BookRead, status_code=status.HTTP_201_CREATED, summary="Kitap ekle (ADMIN)")
 def create_book(data: BookCreate, db: DbSession, admin: AdminDep):
-    return handle_service_error(service.create_book, db, data)
+    return handle_service_error(service.create_book, db, data, admin)
 
 
 @router.put("/books/{id}", response_model=BookRead, summary="Kitap güncelle (ADMIN)")
 def update_book(id: uuid.UUID, data: BookUpdate, db: DbSession, admin: AdminDep):
-    return handle_service_error(service.update_book, db, id, data)
+    return handle_service_error(service.update_book, db, id, data, admin)
 
 
 @router.delete("/books/{id}", status_code=status.HTTP_204_NO_CONTENT, summary="Kitap sil (ADMIN)")
 def delete_book(id: uuid.UUID, db: DbSession, admin: AdminDep):
-    handle_service_error(service.delete_book, db, id)
+    handle_service_error(service.delete_book, db, id, admin)

@@ -17,6 +17,7 @@ from app.core.base_model import Base, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.modules.borrowing.models import Borrowing, Reservation
+    from app.modules.library.models import Library
     from app.modules.review.models import Review
 
 
@@ -82,7 +83,11 @@ class Book(UUIDPrimaryKeyMixin, Base):
     stock_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     call_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    library_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("libraries.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
+    library: Mapped["Library | None"] = relationship(back_populates="books", lazy="selectin")
     publisher: Mapped[Publisher | None] = relationship(back_populates="books", lazy="joined")
     authors: Mapped[list[Author]] = relationship(
         secondary=book_authors, back_populates="books", lazy="selectin"
@@ -114,6 +119,26 @@ class Book(UUIDPrimaryKeyMixin, Base):
     @property
     def reserved_count(self) -> int:
         return len(self._sorted_pending_reservations)
+
+    @property
+    def library_name(self) -> str | None:
+        return self.library.name if self.library else None
+
+    @property
+    def library_daily_fine_amount(self) -> float:
+        return float(self.library.daily_fine_amount) if self.library else 5.0
+
+    @property
+    def library_max_borrow_days(self) -> int:
+        return int(self.library.max_borrow_days) if self.library else 14
+
+    @property
+    def library_max_books_per_user(self) -> int:
+        return int(self.library.max_books_per_user) if self.library else 3
+
+    @property
+    def library_penalty_rules_text(self) -> str | None:
+        return self.library.penalty_rules_text if self.library else None
 
     @property
     def reservation_queue_user_ids(self) -> list[uuid.UUID]:

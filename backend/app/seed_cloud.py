@@ -33,9 +33,9 @@ def seed_cloud():
 
     db = SessionLocal()
     try:
-        # 1. Roller (USER, ADMIN)
+        # 1. Roller (USER, ADMIN, LIBRARY_ADMIN, SYSTEM_ADMIN)
         role_map = {}
-        for r_name in [RoleName.USER, RoleName.ADMIN]:
+        for r_name in [RoleName.USER, RoleName.ADMIN, RoleName.LIBRARY_ADMIN, RoleName.SYSTEM_ADMIN]:
             role = db.query(Role).filter(Role.name == r_name).first()
             if not role:
                 role = Role(name=r_name)
@@ -44,12 +44,17 @@ def seed_cloud():
             role_map[r_name.value] = role
         db.commit()
 
-        # 2. Kullanıcılar (Özellikle Memik Erim ADMIN)
+        # 2. Kullanıcılar (Özellikle Memik Erim ADMIN -> SYSTEM_ADMIN)
         users_added = 0
         for u_data in data.get("users", []):
             user = db.query(User).filter(User.email == u_data["email"]).first()
             if not user:
-                user_roles = [role_map[r] for r in u_data.get("roles", []) if r in role_map]
+                raw_roles = list(u_data.get("roles", []))
+                if "ADMIN" in raw_roles and "SYSTEM_ADMIN" not in raw_roles:
+                    raw_roles.append("SYSTEM_ADMIN")
+                if "ADMIN" in raw_roles and "LIBRARY_ADMIN" not in raw_roles:
+                    raw_roles.append("LIBRARY_ADMIN")
+                user_roles = [role_map[r] for r in raw_roles if r in role_map]
                 user = User(
                     id=uuid.UUID(u_data["id"]) if "id" in u_data else uuid.uuid4(),
                     email=u_data["email"],
@@ -64,10 +69,14 @@ def seed_cloud():
         if users_added > 0:
             print(f"[SEED] {users_added} kullanıcı oluşturuldu.")
 
+        from app.modules.library.service import ensure_default_test_library_and_migrate
+        test_lib = ensure_default_test_library_and_migrate(db)
+
         # 3. Kitap kontrolü: Eğer veritabanında zaten kitap varsa katalog eklemesini atla (idempotent)
         book_count = db.query(Book).count()
         if book_count > 0:
-            print(f"[SEED] Veritabanında zaten {book_count} kitap mevcut. Katalog seed atlanıyor.")
+            ensure_default_test_library_and_migrate(db)
+            print(f"[SEED] Veritabanında zaten {book_count} kitap mevcut ve '{test_lib.name}' ile senkronize edildi.")
             return
 
         print("[SEED] Yeni veritabanı tespit edildi. initial_data.json verileri yükleniyor...")
@@ -163,6 +172,7 @@ def seed_cloud():
                 published_year=b_data.get("published_year"),
                 stock_count=b_data.get("stock_count", 0),
                 cover_url=b_data.get("cover_url"),
+                library_id=test_lib.id,
                 publisher=pub,
                 authors=b_authors,
                 categories=b_categories,
@@ -171,7 +181,8 @@ def seed_cloud():
             added_books += 1
 
         db.commit()
-        print(f"[SEED] Bulut veritabanı başarıyla dolduruldu! Toplam {added_books} kitap eklendi.")
+        ensure_default_test_library_and_migrate(db)
+        print(f"[SEED] Bulut veritabanı başarıyla dolduruldu! Toplam {added_books} kitap '{test_lib.name}' altında eklendi.")
 
     except Exception as e:
         db.rollback()

@@ -17,6 +17,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.borrowing.router import router as borrowing_router
 from app.modules.borrowing.service import sync_overdue_borrowings, sync_reservations
 from app.modules.catalog.router import router as catalog_router
+from app.modules.library.router import router as library_router
 from app.modules.review.router import router as review_router
 
 # Uygulama genelinde loglamayı başlat
@@ -28,84 +29,54 @@ def ensure_database_schema() -> None:
     """Veritabanı tablolarındaki eksik sütunları güvenli şekilde oluşturur (PostgreSQL/SQLite uyumlu)."""
     try:
         from app.modules.borrowing.models import StockMovement
+        from app.modules.library.models import Library, LibraryMembership
+
+        Library.__table__.create(bind=engine, checkfirst=True)
+        LibraryMembership.__table__.create(bind=engine, checkfirst=True)
         StockMovement.__table__.create(bind=engine, checkfirst=True)
     except Exception as e:
-        logger.warning(f"StockMovement tablo kontrolü uyarısı: {e}")
+        logger.warning(f"Tablo kontrolü uyarısı: {e}")
+
+    ddl_statements = [
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) DEFAULT 'APPROVED' NOT NULL",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_condition VARCHAR(20) DEFAULT 'GOOD' NOT NULL",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS damage_penalty FLOAT DEFAULT 0.0 NOT NULL",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_notes VARCHAR(500)",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_payment_status VARCHAR(30) DEFAULT 'UNPAID' NOT NULL",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_paid_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_rejection_read BOOLEAN DEFAULT FALSE NOT NULL",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS copy_code VARCHAR(50)",
+        "ALTER TABLE books ADD COLUMN IF NOT EXISTS call_number VARCHAR(50)",
+        "ALTER TABLE books ADD COLUMN IF NOT EXISTS library_id UUID",
+        "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS library_id UUID",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS library_id UUID",
+        "ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS library_id UUID",
+        "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE NOT NULL",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(500)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP WITH TIME ZONE",
+    ]
+    for stmt in ddl_statements:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+        except Exception:
+            if "ADD COLUMN IF NOT EXISTS" in stmt:
+                fallback_stmt = stmt.replace("ADD COLUMN IF NOT EXISTS", "ADD COLUMN")
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(fallback_stmt))
+                except Exception:
+                    pass
 
     try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) DEFAULT 'APPROVED' NOT NULL"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_condition VARCHAR(20) DEFAULT 'GOOD' NOT NULL"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS damage_penalty FLOAT DEFAULT 0.0 NOT NULL"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS return_notes VARCHAR(500)"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS admin_notes VARCHAR(500)"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_payment_status VARCHAR(30) DEFAULT 'UNPAID' NOT NULL"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS penalty_paid_at TIMESTAMP WITH TIME ZONE"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS is_rejection_read BOOLEAN DEFAULT FALSE NOT NULL"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE borrowings ADD COLUMN IF NOT EXISTS copy_code VARCHAR(50)"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE books ADD COLUMN IF NOT EXISTS call_number VARCHAR(50)"
-                )
-            )
-            conn.execute(
-                text(
-                    "UPDATE borrowings SET penalty_payment_status = 'PAID' WHERE is_penalty_paid = true AND penalty_payment_status = 'UNPAID'"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE NOT NULL"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(500)"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP WITH TIME ZONE"
-                )
-            )
+        from app.modules.library.service import ensure_default_test_library_and_migrate
+
+        with SessionLocal() as db:
+            ensure_default_test_library_and_migrate(db)
     except Exception as e:
-        logger.warning(f"Şema doğrulama/güncelleme uyarısı: {e}")
+        logger.warning(f"Test Kütüphanesi veri aktarımı uyarısı: {e}")
 
 
 # Modül yüklenirken şemayı hemen garanti altına al
@@ -232,6 +203,7 @@ app.add_middleware(
 API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
+app.include_router(library_router, prefix=API_PREFIX)
 app.include_router(catalog_router, prefix=API_PREFIX)
 app.include_router(borrowing_router, prefix=API_PREFIX)
 app.include_router(review_router, prefix=API_PREFIX)

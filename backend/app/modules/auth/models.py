@@ -9,12 +9,15 @@ from app.core.base_model import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.modules.borrowing.models import Borrowing, Reservation
+    from app.modules.library.models import LibraryMembership
     from app.modules.review.models import Review
 
 
 class RoleName(str, enum.Enum):
     USER = "USER"
     ADMIN = "ADMIN"
+    LIBRARY_ADMIN = "LIBRARY_ADMIN"
+    SYSTEM_ADMIN = "SYSTEM_ADMIN"
 
 
 # UserRoles: (user_id, role_id) composite primary key
@@ -43,6 +46,21 @@ class User(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     borrowings: Mapped[list["Borrowing"]] = relationship(back_populates="user")
     reservations: Mapped[list["Reservation"]] = relationship(back_populates="user")
     reviews: Mapped[list["Review"]] = relationship(back_populates="user")
+    library_memberships: Mapped[list["LibraryMembership"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    def has_role(self, role_name: str | RoleName) -> bool:
+        target = role_name.value if hasattr(role_name, "value") else str(role_name)
+        for r in self.roles or []:
+            r_val = r.name.value if hasattr(r.name, "value") else str(r.name)
+            if r_val == target:
+                return True
+        return False
+
+    @property
+    def is_system_admin(self) -> bool:
+        return self.has_role(RoleName.SYSTEM_ADMIN) or self.has_role(RoleName.ADMIN)
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

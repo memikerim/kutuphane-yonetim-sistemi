@@ -47,6 +47,11 @@ export default function AdminPanel({
   onSelectBook,
   initialSubTab,
   initialFilter,
+  activeLibraryId = '',
+  activeLibrary = null,
+  isSystemAdmin = false,
+  user = null,
+  onLibrariesChanged,
 }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'books');
   const [loading, setLoading] = useState(true);
@@ -57,10 +62,33 @@ export default function AdminPanel({
   const [publishers, setPublishers] = useState([]);
   const [borrowings, setBorrowings] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [libraryMembers, setLibraryMembers] = useState([]);
+  const [memberStatusFilter, setMemberStatusFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'APPROVED' | 'BANNED' | 'REJECTED'
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [banModalUser, setBanModalUser] = useState(null);
   const [banReasonInput, setBanReasonInput] = useState('');
   const [banSubmitting, setBanSubmitting] = useState(false);
+
+  // Kütüphane Yöneticisi Yetki Devri Onay Modalı State'i
+  const [rolePromoteModalMember, setRolePromoteModalMember] = useState(null);
+  const [rolePromoteSubmitting, setRolePromoteSubmitting] = useState(false);
+
+  // Kütüphane ve Ceza Ayarları State'i
+  const [librarySettingsForm, setLibrarySettingsForm] = useState({
+    name: activeLibrary?.name || '',
+    description: activeLibrary?.description || '',
+    daily_fine_amount: activeLibrary?.daily_fine_amount ?? 5.0,
+    max_borrow_days: activeLibrary?.max_borrow_days ?? 14,
+    max_books_per_user: activeLibrary?.max_books_per_user ?? 3,
+    penalty_rules_text: activeLibrary?.penalty_rules_text || '',
+  });
+  const [savingLibrarySettings, setSavingLibrarySettings] = useState(false);
+
+  // Sistem Yöneticisi (SYSTEM_ADMIN) Kütüphane Kurulum Talepleri State'i
+  const [systemLibraries, setSystemLibraries] = useState([]);
+  const [systemLibFilter, setSystemLibFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'
+  const [processingSystemLibId, setProcessingSystemLibId] = useState(null);
+
   const [simulatingId, setSimulatingId] = useState(null);
   const [workflowFilter, setWorkflowFilter] = useState(
     initialSubTab === 'workflow' && initialFilter ? initialFilter : 'ALL'
@@ -166,6 +194,31 @@ export default function AdminPanel({
   const loadAllCatalogData = async () => {
     setLoading(true);
     try {
+      const promises = [
+        api.getBooks({ page: 1, limit: 100, library_id: activeLibraryId || undefined }),
+        api.getAuthors(),
+        api.getCategories(),
+        api.getPublishers(),
+        api.getAdminBorrowings(activeLibraryId).catch(() => []),
+        api
+          .getUnpaidPenalties(activeLibraryId)
+          .catch(() => ({ total_unpaid_amount: 0, debtor_count: 0, items: [] })),
+        api.getSystemLogs({ limit: 100 }).catch(() => []),
+        api
+          .getStockMovements({ limit: 150, library_id: activeLibraryId || undefined })
+          .catch(() => ({
+            total_movements: 0,
+            damaged_count: 0,
+            lost_count: 0,
+            total_damage_lost_penalty: 0,
+            items: [],
+          })),
+        api.getAdminUsers(activeLibraryId).catch(() => []),
+        activeLibraryId ? api.getLibraryMembers(activeLibraryId).catch(() => []) : Promise.resolve([]),
+        activeLibraryId ? api.getLibraryDetail(activeLibraryId).catch(() => null) : Promise.resolve(null),
+        isSystemAdmin ? api.getSystemAdminLibraries().catch(() => []) : Promise.resolve([]),
+      ];
+
       const [
         booksRes,
         authorsRes,
@@ -176,25 +229,11 @@ export default function AdminPanel({
         logsRes,
         stockRes,
         usersRes,
-      ] = await Promise.all([
-        api.getBooks({ page: 1, limit: 100 }),
-        api.getAuthors(),
-        api.getCategories(),
-        api.getPublishers(),
-        api.getAdminBorrowings().catch(() => []),
-        api
-          .getUnpaidPenalties()
-          .catch(() => ({ total_unpaid_amount: 0, debtor_count: 0, items: [] })),
-        api.getSystemLogs({ limit: 100 }).catch(() => []),
-        api.getStockMovements({ limit: 150 }).catch(() => ({
-          total_movements: 0,
-          damaged_count: 0,
-          lost_count: 0,
-          total_damage_lost_penalty: 0,
-          items: [],
-        })),
-        api.getAdminUsers().catch(() => []),
-      ]);
+        membersRes,
+        libDetailRes,
+        sysLibsRes,
+      ] = await Promise.all(promises);
+
       const bookItems = booksRes?.items || [];
       setBooks(bookItems);
       setAuthors(authorsRes || []);
@@ -204,6 +243,20 @@ export default function AdminPanel({
       setUnpaidPenalties(penaltiesRes || { total_unpaid_amount: 0, debtor_count: 0, items: [] });
       setSystemLogs(logsRes || []);
       setAdminUsers(usersRes || []);
+      setLibraryMembers(membersRes || []);
+      if (libDetailRes) {
+        setLibrarySettingsForm({
+          name: libDetailRes.name || '',
+          description: libDetailRes.description || '',
+          daily_fine_amount: libDetailRes.daily_fine_amount ?? 5.0,
+          max_borrow_days: libDetailRes.max_borrow_days ?? 14,
+          max_books_per_user: libDetailRes.max_books_per_user ?? 3,
+          penalty_rules_text: libDetailRes.penalty_rules_text || '',
+        });
+      }
+      if (isSystemAdmin) {
+        setSystemLibraries(sysLibsRes || []);
+      }
       setStockSummary(
         stockRes || {
           total_movements: 0,
@@ -223,11 +276,128 @@ export default function AdminPanel({
     }
   };
 
-  const openBanUserModal = (userObj) => {
-    setBanModalUser(userObj);
+  // Kütüphane Üyelik Durumu Güncelleme (Onayla / Reddet / Banla / Ban Kaldır)
+  const handleMembershipStatusChange = async (membership, newStatus, customBanReason = null) => {
+    if (!activeLibraryId || !membership) return;
+    setBanSubmitting(true);
+    try {
+      await api.updateMembershipStatus(activeLibraryId, membership.id, {
+        status: newStatus,
+        ban_reason: customBanReason || undefined,
+      });
+      const statusMsg =
+        newStatus === 'APPROVED'
+          ? `"${membership.user_full_name}" kullanıcısının kütüphane üyeliği onaylandı (APPROVED)!`
+          : newStatus === 'REJECTED'
+          ? `"${membership.user_full_name}" kullanıcısının üyelik başvurusu reddedildi.`
+          : `"${membership.user_full_name}" kullanıcısı bu kütüphaneden banlandı (BANNED).`;
+      notify(statusMsg, newStatus === 'APPROVED' ? 'success' : 'info');
+      setBanModalUser(null);
+      await loadAllCatalogData();
+      if (onLibrariesChanged) onLibrariesChanged();
+    } catch (err) {
+      notify(err.message || 'Üyelik durumu güncellenemedi', 'error');
+    } finally {
+      setBanSubmitting(false);
+    }
+  };
+
+  // Kütüphane Yöneticisi Yetkisi Verme (LIBRARY_ADMIN) Onay İşlemi
+  const handleConfirmPromoteRole = async () => {
+    if (!activeLibraryId || !rolePromoteModalMember) return;
+    setRolePromoteSubmitting(true);
+    try {
+      await api.updateMembershipRole(activeLibraryId, rolePromoteModalMember.id, {
+        role: 'LIBRARY_ADMIN',
+      });
+      notify(
+        `"${rolePromoteModalMember.user_full_name}" kullanıcısına "${
+          librarySettingsForm.name || activeLibrary?.name || 'Kütüphane'
+        }" için Kütüphane Yöneticisi (LIBRARY_ADMIN) yetkisi verildi!`,
+        'success'
+      );
+      setRolePromoteModalMember(null);
+      await loadAllCatalogData();
+      if (onLibrariesChanged) onLibrariesChanged();
+    } catch (err) {
+      notify(err.message || 'Yönetici yetkisi atanamadı', 'error');
+    } finally {
+      setRolePromoteSubmitting(false);
+    }
+  };
+
+  const handleDemoteRoleToMember = async (membership) => {
+    if (!activeLibraryId || !membership) return;
+    if (
+      !window.confirm(
+        `"${membership.user_full_name}" kullanıcısının Kütüphane Yöneticisi (LIBRARY_ADMIN) yetkisini geri alıp standart ÜYE (MEMBER) yapmak istiyor musunuz?`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.updateMembershipRole(activeLibraryId, membership.id, {
+        role: 'MEMBER',
+      });
+      notify(`"${membership.user_full_name}" kullanıcısının rolü ÜYE (MEMBER) olarak güncellendi.`, 'info');
+      await loadAllCatalogData();
+      if (onLibrariesChanged) onLibrariesChanged();
+    } catch (err) {
+      notify(err.message || 'Rol güncellenemedi', 'error');
+    }
+  };
+
+  // Kütüphane ve Ceza Ayarlarını Kaydet
+  const handleSaveLibrarySettings = async (e) => {
+    e.preventDefault();
+    if (!activeLibraryId) return;
+    setSavingLibrarySettings(true);
+    try {
+      await api.updateLibrarySettings(activeLibraryId, {
+        name: librarySettingsForm.name.trim(),
+        description: librarySettingsForm.description.trim() || null,
+        daily_fine_amount: Number(librarySettingsForm.daily_fine_amount),
+        max_borrow_days: Number(librarySettingsForm.max_borrow_days),
+        max_books_per_user: Number(librarySettingsForm.max_books_per_user),
+        penalty_rules_text: librarySettingsForm.penalty_rules_text.trim() || null,
+      });
+      notify('Kütüphane ve ceza/ödünç ayarları başarıyla güncellendi!', 'success');
+      await loadAllCatalogData();
+      if (onLibrariesChanged) onLibrariesChanged();
+      if (onCatalogChanged) onCatalogChanged();
+    } catch (err) {
+      notify(err.message || 'Kütüphane ayarları kaydedilemedi', 'error');
+    } finally {
+      setSavingLibrarySettings(false);
+    }
+  };
+
+  // SYSTEM_ADMIN: Kütüphane Kurulum Talebi Onayla / Reddet
+  const handleSystemAdminLibraryDecision = async (lib, status) => {
+    setProcessingSystemLibId(lib.id);
+    try {
+      await api.updateSystemAdminLibraryStatus(lib.id, status);
+      notify(
+        status === 'APPROVED'
+          ? `"${lib.name}" kütüphanesi onaylandı ve kurucu kullanıcı otomatik olarak Kütüphane Yöneticisi (LIBRARY_ADMIN) atandı!`
+          : `"${lib.name}" kütüphane kurulum talebi reddedildi.`,
+        status === 'APPROVED' ? 'success' : 'info'
+      );
+      await loadAllCatalogData();
+      if (onLibrariesChanged) onLibrariesChanged();
+      if (onCatalogChanged) onCatalogChanged();
+    } catch (err) {
+      notify(err.message || 'Kütüphane durumu güncellenemedi', 'error');
+    } finally {
+      setProcessingSystemLibId(null);
+    }
+  };
+
+  const openBanUserModal = (memberOrUserObj) => {
+    setBanModalUser(memberOrUserObj);
     setBanReasonInput(
-      userObj.ban_reason ||
-        'Kitap iadeniz yapılana ve gecikme/hasar/kayıp borcunuz ödenene kadar hesabınız yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır.'
+      memberOrUserObj.ban_reason ||
+        'Kitap iadeniz yapılana ve gecikme/hasar/kayıp borcunuz ödenene kadar hesabınız bu kütüphanede yeni kitap ödünç almaya, rezervasyon yapmaya ve yorum yapmaya kapalı olacaktır.'
     );
   };
 
@@ -238,11 +408,16 @@ export default function AdminPanel({
       notify('Lütfen en az 5 karakterlik bir banlama/kısıtlama sebebi girin.', 'error');
       return;
     }
+    // Eğer bu bir LibraryMembership kaydıysa (user_id alanı varsa) kütüphane bazlı ban uygula
+    if (banModalUser.user_id && activeLibraryId) {
+      await handleMembershipStatusChange(banModalUser, 'BANNED', banReasonInput.trim());
+      return;
+    }
     setBanSubmitting(true);
     try {
-      await api.banUser(banModalUser.id, banReasonInput.trim());
+      await api.banUser(banModalUser.id, { ban_reason: banReasonInput.trim() });
       notify(
-        `"${banModalUser.full_name}" kullanıcısı kısıtlandı (banlandı). Kullanıcı giriş yaptığında uyarı penceresi gösterilecektir.`,
+        `"${banModalUser.full_name}" kullanıcısı kısıtlandı (banlandı).`,
         'success'
       );
       setBanModalUser(null);
@@ -588,14 +763,14 @@ export default function AdminPanel({
 
   useEffect(() => {
     loadAllCatalogData();
-  }, []);
+  }, [activeLibraryId, isSystemAdmin]);
 
   useEffect(() => {
     if (subTab === 'logs') {
       loadSystemLogs(logCategoryFilter, logLevelFilter);
     } else if (subTab === 'penalties') {
       api
-        .getUnpaidPenalties()
+        .getUnpaidPenalties(activeLibraryId)
         .then((res) =>
           setUnpaidPenalties(
             res || { total_unpaid_amount: 0, debtor_count: 0, items: [] }
@@ -603,7 +778,7 @@ export default function AdminPanel({
         )
         .catch(() => {});
     }
-  }, [subTab]);
+  }, [subTab, activeLibraryId]);
 
   // Open Modals
   const openCreateModal = (type) => {
@@ -866,6 +1041,7 @@ export default function AdminPanel({
           publisher_id: finalPublisherId,
           author_ids: finalAuthorIds,
           category_ids: finalCategoryIds,
+          library_id: activeLibraryId || undefined,
         };
         if (editingItem) {
           await api.updateBook(editingItem.id, payload);
@@ -1023,15 +1199,21 @@ export default function AdminPanel({
       {/* Admin Header Banner */}
       <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-indigo-500/10 rounded-2xl p-5 sm:p-6 border border-amber-300/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 mb-2">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            YETKİLİ YÖNETİCİ (ADMIN) MODÜLÜ
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              {isSystemAdmin ? 'SİSTEM YÖNETİCİSİ (SYSTEM_ADMIN) & KÜTÜPHANE MODÜLÜ' : 'KÜTÜPHANE YÖNETİCİSİ (LIBRARY_ADMIN) MODÜLÜ'}
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+              <Building2 className="w-3.5 h-3.5" />
+              Yönetilen Kütüphane: {librarySettingsForm.name || activeLibrary?.name || 'Test Kütüphanesi'}
+            </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-            Katalog, İş Akışı Onay ve Envanter Yönetim Paneli
+            {librarySettingsForm.name || activeLibrary?.name || 'Kütüphane'} — Katalog, Üyelik ve İş Akışı Yönetim Paneli
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Ödünç/iade onay kuyruğunu yönetebilir, kitap bazlı okuma geçmişini ve hasar/kayıp stok raporlarını denetleyebilirsiniz.
+            Bu paneldeki kitaplar, ödünç/iade kuyruğu, üyeler ve ceza kuralları seçili kütüphaneye ({librarySettingsForm.name || activeLibrary?.name || 'Test Kütüphanesi'}) özel olarak tamamen izole çalışır.
           </p>
         </div>
 
@@ -1151,32 +1333,79 @@ export default function AdminPanel({
             }`}
           >
             <ShieldAlert className="w-4 h-4" />
-            Üyeler & Ban Yönetimi ({adminUsers.length})
-            {adminUsers.some((u) => u.is_banned) && (
+            Üyelik Başvuruları, Ban & Yetki ({libraryMembers.length})
+            {libraryMembers.some((m) => m.status === 'PENDING') && (
               <span
                 className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
-                  subTab === 'users' ? 'bg-white text-rose-800' : 'bg-rose-600 text-white'
+                  subTab === 'users' ? 'bg-white text-rose-800' : 'bg-amber-500 text-white animate-pulse'
                 }`}
               >
-                {adminUsers.filter((u) => u.is_banned).length} Banlı
+                {libraryMembers.filter((m) => m.status === 'PENDING').length} Başvuru
               </span>
             )}
           </button>
 
           <button
-            onClick={() => setSubTab('logs')}
+            onClick={() => setSubTab('library_settings')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
-              subTab === 'logs'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+              subTab === 'library_settings'
+                ? 'bg-violet-700 text-white shadow-xs'
+                : 'bg-violet-50 text-violet-800 border border-violet-200 hover:bg-violet-100'
             }`}
           >
-            <ScrollText className="w-4 h-4" />
-            Sistem Logları ({systemLogs.length})
+            <Building2 className="w-4 h-4" />
+            Kütüphane ve Ceza Ayarları
           </button>
+
+          {isSystemAdmin && (
+            <button
+              onClick={() => setSubTab('system_libraries')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                subTab === 'system_libraries'
+                  ? 'bg-purple-800 text-white shadow-xs'
+                  : 'bg-purple-50 text-purple-900 border border-purple-300 hover:bg-purple-100'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              Sistem Yönetimi: Kütüphane Talepleri ({systemLibraries.length})
+              {systemLibraries.some((l) => l.status === 'PENDING') && (
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+                    subTab === 'system_libraries'
+                      ? 'bg-white text-purple-900'
+                      : 'bg-amber-500 text-white animate-pulse'
+                  }`}
+                >
+                  {systemLibraries.filter((l) => l.status === 'PENDING').length} Bekleyen
+                </span>
+              )}
+            </button>
+          )}
+
+          {isSystemAdmin && (
+            <button
+              onClick={() => setSubTab('logs')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                subTab === 'logs'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+              }`}
+            >
+              <ScrollText className="w-4 h-4" />
+              Sistem Logları ({systemLogs.length})
+            </button>
+          )}
         </div>
 
-        {!['borrowings', 'stock_reports', 'penalties', 'users', 'logs'].includes(subTab) && (
+        {![
+          'borrowings',
+          'stock_reports',
+          'penalties',
+          'users',
+          'library_settings',
+          'system_libraries',
+          'logs',
+        ].includes(subTab) && (
           <button
             onClick={() =>
               openCreateModal(
@@ -2443,144 +2672,562 @@ export default function AdminPanel({
             </table>
           )}
 
-          {/* Üyeler & Ban Yönetimi Tablosu (subTab === 'users') */}
+          {/* Kütüphane Üyelik Başvuruları, Ban Yönetimi & Yetki Devri Tablosu (subTab === 'users') */}
           {subTab === 'users' && (
             <div>
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={userSearchQuery}
-                    onChange={(e) => setUserSearchQuery(e.target.value)}
-                    placeholder="Üye adı veya e-posta adresi ile ara..."
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
-                  />
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={userSearchQuery}
+                      onChange={(e) => setUserSearchQuery(e.target.value)}
+                      placeholder="Üye adı, e-posta, telefon veya öğrenci/TC no ile ara..."
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { key: 'ALL', label: `Tümü (${libraryMembers.length})` },
+                      {
+                        key: 'PENDING',
+                        label: `Onay Bekleyen Başvurular (${
+                          libraryMembers.filter((m) => m.status === 'PENDING').length
+                        })`,
+                      },
+                      {
+                        key: 'APPROVED',
+                        label: `Onaylı Üyeler (${
+                          libraryMembers.filter((m) => m.status === 'APPROVED').length
+                        })`,
+                      },
+                      {
+                        key: 'BANNED',
+                        label: `Banlılar (${
+                          libraryMembers.filter((m) => m.status === 'BANNED').length
+                        })`,
+                      },
+                      {
+                        key: 'REJECTED',
+                        label: `Reddedilenler (${
+                          libraryMembers.filter((m) => m.status === 'REJECTED').length
+                        })`,
+                      },
+                    ].map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => setMemberStatusFilter(f.key)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          memberStatusFilter === f.key
+                            ? 'bg-rose-700 text-white shadow-2xs'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <span className="text-xs text-slate-500">
-                  Banlanan üyeler giriş yaptığında ban sebebi açılır pencere (popup) olarak gösterilir; yeni ödünç, rezervasyon ve yorum işlemleri kapatılır.
+                  Kütüphanenize gelen katılım başvurularını (Telefon, Öğrenci/Kurum/TC No, Bölüm/Adres) inceleyip onaylayabilir, üyeleri banlayabilir veya onaylı üyelere <strong>Kütüphane Yöneticisi (LIBRARY_ADMIN)</strong> yetkisi verebilirsiniz.
                 </span>
+              </div>
+
+              <table className="w-full text-left border-collapse min-w-[920px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    <th className="py-3.5 px-4">Üye Bilgisi</th>
+                    <th className="py-3.5 px-4">Başvuru Bilgileri (Telefon / Kurum No / Adres)</th>
+                    <th className="py-3.5 px-4">Kütüphane Rolü</th>
+                    <th className="py-3.5 px-4">Üyelik Durumu & Ban Notu</th>
+                    <th className="py-3.5 px-4 text-right">Onay / Ban / Yetki İşlemleri</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {libraryMembers
+                    .filter((m) => {
+                      if (memberStatusFilter !== 'ALL' && m.status !== memberStatusFilter) {
+                        return false;
+                      }
+                      const q = userSearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        (m.user_full_name || '').toLowerCase().includes(q) ||
+                        (m.user_email || '').toLowerCase().includes(q) ||
+                        (m.phone || '').toLowerCase().includes(q) ||
+                        (m.identity_or_student_no || '').toLowerCase().includes(q) ||
+                        (m.department_or_address || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((m) => {
+                      const isLibAdmin = m.role === 'LIBRARY_ADMIN';
+                      const isBanned = m.status === 'BANNED';
+                      const isPending = m.status === 'PENDING';
+                      const isRejected = m.status === 'REJECTED';
+                      return (
+                        <tr
+                          key={m.id}
+                          className={`transition-colors ${
+                            isBanned
+                              ? 'bg-rose-50/40 hover:bg-rose-50/70'
+                              : isPending
+                              ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                              : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="py-3.5 px-4">
+                            <div className="font-bold text-slate-900">{m.user_full_name}</div>
+                            <div className="text-xs text-slate-500">{m.user_email}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Başvuru: {formatTimestamp(m.created_at)}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-xs space-y-1 max-w-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-400 font-semibold">Telefon:</span>
+                              <span className="font-mono font-bold text-slate-800">
+                                {m.phone || 'Belirtilmedi'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-400 font-semibold">Öğrenci/Kurum/TC No:</span>
+                              <span className="font-mono font-bold text-indigo-700">
+                                {m.identity_or_student_no || 'Belirtilmedi'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-semibold">Bölüm / Adres: </span>
+                              <span className="text-slate-700 font-medium">
+                                {m.department_or_address || 'Belirtilmedi'}
+                              </span>
+                            </div>
+                            {m.application_note && (
+                              <div className="p-2 rounded-lg bg-indigo-50/60 border border-indigo-100 text-[11px] text-indigo-900">
+                                <strong>Katılım Notu:</strong> "{m.application_note}"
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {isLibAdmin ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                                <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
+                                LIBRARY_ADMIN
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                MEMBER (Üye)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 max-w-xs">
+                            {isBanned ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-600 text-white">
+                                  <ShieldAlert className="w-3.5 h-3.5" />
+                                  BANLI (BANNED)
+                                </span>
+                                {m.ban_reason && (
+                                  <p className="text-xs text-rose-800 font-medium leading-snug">
+                                    "{m.ban_reason}"
+                                  </p>
+                                )}
+                              </div>
+                            ) : isPending ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                                <Clock className="w-3.5 h-3.5 animate-pulse" />
+                                ONAY BEKLİYOR (PENDING)
+                              </span>
+                            ) : isRejected ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-200 text-slate-700">
+                                <X className="w-3.5 h-3.5" />
+                                REDDEDİLDİ (REJECTED)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                ONAYLI (APPROVED)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                              {isPending && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMembershipStatusChange(m, 'APPROVED')}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    Başvuruyu Onayla
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMembershipStatusChange(m, 'REJECTED')}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-bold cursor-pointer"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    Reddet
+                                  </button>
+                                </>
+                              )}
+
+                              {isRejected && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMembershipStatusChange(m, 'APPROVED')}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  Yeniden Onayla
+                                </button>
+                              )}
+
+                              {m.status === 'APPROVED' && (
+                                <>
+                                  {!isLibAdmin ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setRolePromoteModalMember(m)}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                      title="Bu üyeye Kütüphane Yöneticisi (LIBRARY_ADMIN) yetkisi ver"
+                                    >
+                                      <ShieldCheck className="w-3.5 h-3.5" />
+                                      Yönetici Yetkisi Ver
+                                    </button>
+                                  ) : m.user_id !== user?.id ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDemoteRoleToMember(m)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                                    >
+                                      Üyeye Düşür
+                                    </button>
+                                  ) : null}
+
+                                  {m.user_id !== user?.id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openBanUserModal(m)}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                    >
+                                      <ShieldAlert className="w-3.5 h-3.5" />
+                                      Banla
+                                    </button>
+                                  )}
+                                </>
+                              )}
+
+                              {isBanned && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openBanUserModal(m)}
+                                    className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold cursor-pointer"
+                                  >
+                                    Ban Notu
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMembershipStatusChange(m, 'APPROVED')}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    Banı Kaldır
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Kütüphane ve Ceza Ayarları Sekmesi (subTab === 'library_settings') */}
+          {subTab === 'library_settings' && (
+            <div className="p-6 max-w-3xl">
+              <div className="mb-5">
+                <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-violet-600" />
+                  Kütüphane ve Ceza Ayarları ({librarySettingsForm.name || activeLibrary?.name})
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Bu kütüphaneye ait günlük gecikme cezasını (TL), maksimum ödünç gün sayısını, kişi başı kitap limitini ve ceza/ödünç şartları açıklamasını buradan güncelleyebilirsiniz.
+                </p>
+              </div>
+
+              <form onSubmit={handleSaveLibrarySettings} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Kütüphane Adı *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={librarySettingsForm.name}
+                      onChange={(e) =>
+                        setLibrarySettingsForm((prev) => ({ ...prev, name: e.target.value }))
+                      }
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Kütüphane Açıklaması
+                    </label>
+                    <input
+                      type="text"
+                      value={librarySettingsForm.description}
+                      onChange={(e) =>
+                        setLibrarySettingsForm((prev) => ({
+                          ...prev,
+                          description: e.target.value,
+                        }))
+                      }
+                      placeholder="Örn: Merkez Kampüs Kütüphanesi..."
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 rounded-2xl bg-violet-50/60 border border-violet-200">
+                  <div>
+                    <label className="block text-xs font-bold text-violet-950 mb-1">
+                      Günlük Gecikme Cezası (TL) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      required
+                      value={librarySettingsForm.daily_fine_amount}
+                      onChange={(e) =>
+                        setLibrarySettingsForm((prev) => ({
+                          ...prev,
+                          daily_fine_amount: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3.5 py-2 rounded-xl border border-violet-300 bg-white text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <span className="text-[11px] text-violet-700 mt-1 block">
+                      Geciken her gün için otomatik çarpılır.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-violet-950 mb-1">
+                      Maksimum Ödünç Süresi (Gün) *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      required
+                      value={librarySettingsForm.max_borrow_days}
+                      onChange={(e) =>
+                        setLibrarySettingsForm((prev) => ({
+                          ...prev,
+                          max_borrow_days: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3.5 py-2 rounded-xl border border-violet-300 bg-white text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <span className="text-[11px] text-violet-700 mt-1 block">
+                      Ödünç alırken varsayılan teslim günü.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-violet-950 mb-1">
+                      Kişi Başı Kitap Limiti *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      required
+                      value={librarySettingsForm.max_books_per_user}
+                      onChange={(e) =>
+                        setLibrarySettingsForm((prev) => ({
+                          ...prev,
+                          max_books_per_user: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3.5 py-2 rounded-xl border border-violet-300 bg-white text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <span className="text-[11px] text-violet-700 mt-1 block">
+                      Aynı anda ödünç alınabilecek maksimum kitap.
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kütüphane Özel Ceza ve Ödünç Şartları Açıklaması
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={librarySettingsForm.penalty_rules_text}
+                    onChange={(e) =>
+                      setLibrarySettingsForm((prev) => ({
+                        ...prev,
+                        penalty_rules_text: e.target.value,
+                      }))
+                    }
+                    placeholder="Örn: Kitaplar en fazla 14 gün süreyle ödünç verilir. Geciken her gün için 5 TL gecikme cezası uygulanır..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingLibrarySettings}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-800 disabled:opacity-60 text-white text-xs sm:text-sm font-bold shadow-sm cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    {savingLibrarySettings
+                      ? 'Kaydediliyor...'
+                      : 'Kütüphane ve Ceza Ayarlarını Güncelle'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Sistem Yönetimi: Kütüphane Kurulum Talepleri Tablosu (subTab === 'system_libraries') */}
+          {subTab === 'system_libraries' && isSystemAdmin && (
+            <div>
+              <div className="p-4 bg-purple-50/70 border-b border-purple-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-extrabold text-purple-950">
+                    Sistem Yöneticisi (SYSTEM_ADMIN) — Kütüphane Kurulum Talepleri
+                  </h3>
+                  <p className="text-xs text-purple-800 mt-0.5">
+                    Kullanıcıların oluşturduğu yeni kütüphane taleplerini onayladığınız anda (APPROVED), talep sahibi otomatik olarak o kütüphanenin yöneticisi (LIBRARY_ADMIN) olur.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {['ALL', 'PENDING', 'APPROVED', 'REJECTED'].map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setSystemLibFilter(st)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${
+                        systemLibFilter === st
+                          ? 'bg-purple-800 text-white'
+                          : 'bg-white text-purple-900 border border-purple-200 hover:bg-purple-100'
+                      }`}
+                    >
+                      {st === 'ALL'
+                        ? `Tümü (${systemLibraries.length})`
+                        : st === 'PENDING'
+                        ? `Bekleyen (${systemLibraries.filter((l) => l.status === 'PENDING').length})`
+                        : st === 'APPROVED'
+                        ? `Onaylı (${systemLibraries.filter((l) => l.status === 'APPROVED').length})`
+                        : `Reddedilen (${systemLibraries.filter((l) => l.status === 'REJECTED').length})`}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <table className="w-full text-left border-collapse min-w-[840px]">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    <th className="py-3.5 px-4">Üye Bilgisi</th>
-                    <th className="py-3.5 px-4">Yetki / Rol</th>
-                    <th className="py-3.5 px-4">Ödünç & Gecikme Durumu</th>
-                    <th className="py-3.5 px-4">Açık Borç (TL)</th>
-                    <th className="py-3.5 px-4">Hesap Durumu & Ban Notu</th>
-                    <th className="py-3.5 px-4 text-right">Ban / Kısıtlama İşlemi</th>
+                    <th className="py-3.5 px-4">Kütüphane Adı & Açıklama</th>
+                    <th className="py-3.5 px-4">Talep Eden Kullanıcı</th>
+                    <th className="py-3.5 px-4">Başlangıç Ceza & Ödünç Kuralları</th>
+                    <th className="py-3.5 px-4">Durum</th>
+                    <th className="py-3.5 px-4 text-right">Sistem Yöneticisi Kararı</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {adminUsers
-                    .filter((u) => {
-                      const q = userSearchQuery.trim().toLowerCase();
-                      if (!q) return true;
-                      return (
-                        (u.full_name || '').toLowerCase().includes(q) ||
-                        (u.email || '').toLowerCase().includes(q)
-                      );
-                    })
-                    .map((u) => {
-                      const isAdminUser = (u.roles || []).includes('ADMIN');
-                      return (
-                        <tr
-                          key={u.id}
-                          className={`transition-colors ${
-                            u.is_banned ? 'bg-rose-50/40 hover:bg-rose-50/70' : 'hover:bg-slate-50/80'
-                          }`}
-                        >
-                          <td className="py-3.5 px-4">
-                            <div className="font-semibold text-slate-900">{u.full_name}</div>
-                            <div className="text-xs text-slate-500">{u.email}</div>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            {isAdminUser ? (
-                              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                                ADMIN
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
-                                ÜYE (USER)
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4 text-xs">
-                            <div>
-                              Aktif Ödünç: <strong>{u.active_borrowings_count || 0} Kitap</strong>
-                            </div>
-                            {(u.overdue_books_count || 0) > 0 && (
-                              <span className="inline-block mt-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-600 text-white">
-                                {u.overdue_books_count} Gecikmiş Kitap!
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            {Number(u.unpaid_penalty_total || 0) > 0 ? (
-                              <span className="font-extrabold text-rose-700 text-xs">
-                                {Number(u.unpaid_penalty_total).toFixed(2)} TL
-                              </span>
-                            ) : (
-                              <span className="text-xs text-slate-400">0.00 TL</span>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4 max-w-xs">
-                            {u.is_banned ? (
-                              <div className="space-y-1">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-600 text-white">
-                                  <ShieldAlert className="w-3.5 h-3.5" />
-                                  BANLI (Kısıtlı Hesap)
-                                </span>
-                                {u.ban_reason && (
-                                  <p className="text-xs text-rose-800 font-medium leading-snug">
-                                    "{u.ban_reason}"
-                                  </p>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Aktif
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                            {isAdminUser ? (
-                              <span className="text-xs text-slate-400 italic">Yönetici Hesabı</span>
-                            ) : u.is_banned ? (
-                              <div className="inline-flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => openBanUserModal(u)}
-                                  className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold cursor-pointer"
-                                >
-                                  Ban Notunu Düzenle
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUnbanUser(u.id, u.full_name)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  Banı Kaldır
-                                </button>
-                              </div>
-                            ) : (
+                  {systemLibraries
+                    .filter((lib) =>
+                      systemLibFilter === 'ALL' ? true : lib.status === systemLibFilter
+                    )
+                    .map((lib) => (
+                      <tr key={lib.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4">
+                          <div className="font-extrabold text-slate-900">{lib.name}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {lib.description || 'Açıklama belirtilmemiş'}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs">
+                          <div className="font-bold text-slate-800">
+                            {lib.created_by_name || 'Sistem'}
+                          </div>
+                          <div className="text-slate-500">{lib.created_by_email || '-'}</div>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs">
+                          <div className="font-semibold text-indigo-900">
+                            Günlük Ceza: {Number(lib.daily_fine_amount ?? 5).toFixed(2)} TL • Süre:{' '}
+                            {lib.max_borrow_days || 14} Gün • Limit: {lib.max_books_per_user || 3} Kitap
+                          </div>
+                          {lib.penalty_rules_text && (
+                            <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                              "{lib.penalty_rules_text}"
+                            </p>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {lib.status === 'PENDING' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                              <Clock className="w-3.5 h-3.5 animate-pulse" />
+                              PENDING (Onay Bekliyor)
+                            </span>
+                          ) : lib.status === 'APPROVED' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              APPROVED (Aktif)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800">
+                              <X className="w-3.5 h-3.5" />
+                              REJECTED
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            {lib.status !== 'APPROVED' && (
                               <button
                                 type="button"
-                                onClick={() => openBanUserModal(u)}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-2xs cursor-pointer"
+                                disabled={processingSystemLibId === lib.id}
+                                onClick={() =>
+                                  handleSystemAdminLibraryDecision(lib, 'APPROVED')
+                                }
+                                className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-2xs cursor-pointer"
                               >
-                                <ShieldAlert className="w-3.5 h-3.5" />
-                                Kullanıcıyı Banla / Not Düş
+                                <Check className="w-3.5 h-3.5" />
+                                Onayla & Yönetici Ata
                               </button>
                             )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            {lib.status === 'PENDING' && (
+                              <button
+                                type="button"
+                                disabled={processingSystemLibId === lib.id}
+                                onClick={() =>
+                                  handleSystemAdminLibraryDecision(lib, 'REJECTED')
+                                }
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-bold cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Reddet
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
@@ -3873,6 +4520,64 @@ export default function AdminPanel({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Kütüphane Yöneticisi Yetki Devri (LIBRARY_ADMIN) Onay Uyarısı Modalı */}
+      {rolePromoteModalMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border-2 border-indigo-400 w-full max-w-md overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-indigo-50 border-b border-indigo-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-indigo-950">
+                    Kütüphane Yöneticiliği Yetki Onayı
+                  </h3>
+                  <p className="text-xs text-indigo-700 font-medium">
+                    Yetki Devri & Yönetici Atama Uyarısı
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRolePromoteModalMember(null)}
+                className="p-1.5 rounded-lg text-indigo-500 hover:text-indigo-800 hover:bg-indigo-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-xs sm:text-sm font-bold leading-relaxed">
+                {rolePromoteModalMember.user_full_name} kullanıcısına{' '}
+                {librarySettingsForm.name || activeLibrary?.name || 'Test Kütüphanesi'} için yönetici yetkisi veriyorsunuz. Bu işlemi onaylıyor musunuz?
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Bu onay sonrasında kullanıcı; yalnızca <strong>{librarySettingsForm.name || activeLibrary?.name || 'Test Kütüphanesi'}</strong> kapsamında kitap ekleme/düzenleme, ödünç/iade onaylama, üyelik başvurularını yönetme ve ceza kurallarını güncelleme yetkisine (<strong>LIBRARY_ADMIN</strong>) sahip olacaktır.
+              </p>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setRolePromoteModalMember(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  disabled={rolePromoteSubmitting}
+                  onClick={handleConfirmPromoteRole}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                  {rolePromoteSubmitting ? 'Atanıyor...' : 'Evet, Yönetici Yetkisi Ver'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

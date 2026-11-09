@@ -50,6 +50,40 @@ class NotFoundError(Exception):
     pass
 
 
+class ForbiddenError(Exception):
+    pass
+
+
+def _check_user_library_membership_and_rules(db: Session, user: User, book: Book):
+    """Kitap belirli bir kütüphaneye aitse kullanıcının o kütüphanede APPROVED üye olup olmadığını ve ban durumunu denetler."""
+    from app.modules.library.models import Library, LibraryMembership, MembershipStatus
+    from app.modules.library.service import is_user_system_admin
+
+    if not book.library_id:
+        return None
+
+    lib = db.get(Library, book.library_id)
+    mem = db.scalar(
+        select(LibraryMembership).where(
+            LibraryMembership.user_id == user.id,
+            LibraryMembership.library_id == book.library_id,
+        )
+    )
+    if mem and mem.status == MembershipStatus.BANNED.value:
+        lib_name = lib.name if lib else "Kütüphane"
+        reason = mem.ban_reason or "Kütüphane kuralları ihlali"
+        raise ForbiddenError(
+            f"'{lib_name}' kütüphanesindeki üyeliğiniz yönetici tarafından kısıtlanmıştır (Banlı): {reason}"
+        )
+
+    if not is_user_system_admin(user):
+        if not mem or mem.status != MembershipStatus.APPROVED.value:
+            raise ForbiddenError(
+                "Katalogları görüntülemek ve kitap ödünç alabilmek için bir kütüphaneye katılmanız gerekmektedir."
+            )
+    return lib
+
+
 def sync_overdue_borrowings(db: Session, user_id: uuid.UUID | None = None) -> None:
     """Teslim tarihi (due_date) geçmiş ACTIVE ödünç kayıtlarının durumunu OVERDUE olarak günceller."""
     today = date.today()
@@ -286,7 +320,7 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
         )
         raise NotFoundError("Kitap bulunamadı")
 
-    if data.due_date < date.today():
+    if data.due_date is not None and data.due_date < date.today():
         logger.warning(
             "Ödünç alma başarısız: Geçmiş tarihli iade tarihi -> due_date: %s, user_id: %s",
             data.due_date,
@@ -300,6 +334,17 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
 
     # Kural 0: Gecikmiş (OVERDUE) kitabı veya ödenmemiş cezası olan kullanıcı yeni kitap ödünç alamaz
     _check_user_overdue_or_unpaid_penalty(db, user)
+
+    # Kural 0.5: Çoklu Kütüphane Üyelik, Ban ve Kütüphane Özel Kuralları Kontrolü
+    lib_obj = _check_user_library_membership_and_rules(db, user, book)
+    max_books_limit = int(lib_obj.max_books_per_user) if (lib_obj and lib_obj.max_books_per_user) else MAX_ACTIVE_BORROWINGS
+    max_days_limit = int(lib_obj.max_borrow_days) if (lib_obj and lib_obj.max_borrow_days) else 14
+    effective_due_date = data.due_date if data.due_date is not None else (date.today() + timedelta(days=max_days_limit))
+    if lib_obj and lib_obj.max_borrow_days:
+        if (effective_due_date - date.today()).days > max_days_limit:
+            raise BusinessRuleError(
+                f"'{lib_obj.name}' kurallarına göre maksimum ödünç alma süresi {max_days_limit} gündür."
+            )
 
     # Kural 1: Kullanıcı aynı kitabı iade etmeden (ACTIVE/OVERDUE iken) ikinci kez ödünç alamaz
     existing_active_for_book = db.scalar(
@@ -319,8 +364,8 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
             "Bu kitap zaten şu an üzerinizde ödünç alınmış durumda. İade etmeden tekrar ödünç alamazsınız."
         )
 
-    # Kural 2: Bir kullanıcı aynı anda en fazla MAX_ACTIVE_BORROWINGS (3) adet aktif kitap tutabilir
-    active_count = db.scalar(
+    # Kural 2: Bir kullanıcı aynı anda en fazla max_books_limit adet aktif kitap tutabilir
+    quota_stmt = (
         select(func.count())
         .select_from(Borrowing)
         .where(
@@ -328,14 +373,17 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
             Borrowing.status.in_([BorrowingStatus.ACTIVE, BorrowingStatus.OVERDUE]),
         )
     )
-    if (active_count or 0) >= MAX_ACTIVE_BORROWINGS:
+    if book.library_id is not None:
+        quota_stmt = quota_stmt.where(Borrowing.library_id == book.library_id)
+    active_count = db.scalar(quota_stmt)
+    if (active_count or 0) >= max_books_limit:
         logger.warning(
             "Ödünç alma başarısız: Maksimum aktif kitap kotası (%d) doldu -> user_id: %s",
-            MAX_ACTIVE_BORROWINGS,
+            max_books_limit,
             user.id,
         )
         raise BusinessRuleError(
-            f"Aynı anda en fazla {MAX_ACTIVE_BORROWINGS} adet kitap ödünç alabilirsiniz. Yeni kitap almak için mevcut kitaplarınızdan birini iade edin."
+            f"Aynı anda en fazla {max_books_limit} adet kitap ödünç alabilirsiniz. Yeni kitap almak için mevcut kitaplarınızdan birini iade edin."
         )
 
     # Kural 3: Rezervasyon Kuyruğu ve Stok Kilidi Kontrolü
@@ -408,7 +456,8 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
     borrowing = Borrowing(
         user_id=user.id,
         book_id=book.id,
-        due_date=data.due_date,
+        library_id=book.library_id,
+        due_date=effective_due_date,
         approval_status=approval_status,
         return_notes=getattr(data, "notes", None),
         copy_code=assigned_copy_code,
@@ -423,6 +472,7 @@ def create_borrowing(db: Session, user: User, data: BorrowingCreate) -> Borrowin
         db.flush()
         movement = StockMovement(
             book_id=book.id,
+            library_id=book.library_id,
             user_id=user.id,
             borrowing_id=borrowing.id,
             movement_type="BORROW_REQUEST" if approval_status == "PENDING_BORROW" else "BORROW_DIRECT",
@@ -497,7 +547,8 @@ def _complete_return_transaction(
         borrowing.admin_notes = notes
 
     overdue_days = max(0, (today - borrowing.due_date).days) if today > borrowing.due_date else 0
-    overdue_penalty = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+    daily_rate = getattr(borrowing, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
+    overdue_penalty = round(overdue_days * daily_rate, 2)
 
     if damage_penalty_override is not None:
         dmg_penalty = round(float(damage_penalty_override), 2)
@@ -566,6 +617,7 @@ def _complete_return_transaction(
     if book:
         movement = StockMovement(
             book_id=book.id,
+            library_id=book.library_id or borrowing.library_id,
             user_id=borrowing.user_id,
             admin_id=admin_user.id if admin_user else None,
             borrowing_id=borrowing.id,
@@ -663,7 +715,8 @@ def return_borrowing(
         # tahmini tazminat/gecikme borcunu hemen yansıt ki borç ödenene kadar yeni kitap ödünç alamasın.
         today = date.today()
         overdue_days = max(0, (today - borrowing.due_date).days) if today > borrowing.due_date else 0
-        overdue_pen = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+        daily_rate = getattr(borrowing, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
+        overdue_pen = round(overdue_days * daily_rate, 2)
         dmg_pen = (
             float(settings.DAMAGED_BOOK_PENALTY)
             if cond == "DAMAGED"
@@ -711,6 +764,9 @@ def create_reservation(db: Session, user: User, data: ReservationCreate) -> Rese
     # Gecikmiş (OVERDUE) kitabı veya ödenmemiş cezası olan kullanıcı rezervasyon yapamaz
     _check_user_overdue_or_unpaid_penalty(db, user)
 
+    # Çoklu Kütüphane Üyelik ve Ban Kontrolü
+    _check_user_library_membership_and_rules(db, user, book)
+
     # Kullanıcının zaten elinde aktif olarak bu kitap varsa rezerve edemez
     existing_active_borrowing = db.scalar(
         select(Borrowing).where(
@@ -739,6 +795,7 @@ def create_reservation(db: Session, user: User, data: ReservationCreate) -> Rese
     reservation = Reservation(
         user_id=user.id,
         book_id=book.id,
+        library_id=book.library_id,
         reservation_date=now,
     )
     db.add(reservation)
@@ -805,8 +862,10 @@ def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> B
         )
         raise NotFoundError("Ödünç alma kaydı bulunamadı")
 
-    is_admin = any(
-        (r.name == RoleName.ADMIN or str(r.name) == "ADMIN") for r in (user.roles or [])
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
+    is_admin = is_user_system_admin(user) or (
+        borrowing.library_id is not None and is_user_library_admin(db, user, borrowing.library_id)
     )
     if borrowing.user_id != user.id and not is_admin:
         logger.warning(
@@ -821,7 +880,8 @@ def pay_borrowing_penalty(db: Session, user: User, borrowing_id: uuid.UUID) -> B
     if (borrowing.penalty_amount or 0.0) <= 0.0:
         if borrowing.due_date < today:
             overdue_days = (today - borrowing.due_date).days
-            borrowing.penalty_amount = round(overdue_days * settings.DAILY_PENALTY_RATE, 2)
+            daily_rate = getattr(borrowing, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
+            borrowing.penalty_amount = round(overdue_days * daily_rate, 2)
         else:
             raise BusinessRuleError("Bu kayıt için ödenecek bir gecikme cezası bulunmamaktadır")
 
@@ -899,38 +959,62 @@ def simulate_overdue_borrowing(db: Session, borrowing_id: uuid.UUID) -> Borrowin
     return borrowing
 
 
-def get_all_borrowings(db: Session) -> Sequence[Borrowing]:
-    """Tüm ödünç işlemlerini (ADMIN paneli için) tarihe göre sıralı döner."""
+def get_all_borrowings(
+    db: Session,
+    library_id: uuid.UUID | None = None,
+    actor: User | None = None,
+) -> Sequence[Borrowing]:
+    """Tüm ödünç işlemlerini (ADMIN / LIBRARY_ADMIN paneli için) tarihe göre sıralı döner."""
+    from app.modules.library.service import (
+        get_user_managed_library_ids,
+        is_user_system_admin,
+        require_library_admin_access,
+    )
+
     sync_overdue_borrowings(db)
     sync_reservations(db)
-    stmt = select(Borrowing).order_by(Borrowing.borrow_date.desc())
+    stmt = select(Borrowing)
+    if actor is not None and not is_user_system_admin(actor):
+        if library_id is not None:
+            require_library_admin_access(db, actor, library_id)
+            stmt = stmt.where(Borrowing.library_id == library_id)
+        else:
+            managed = get_user_managed_library_ids(db, actor)
+            if not managed:
+                return []
+            stmt = stmt.where(Borrowing.library_id.in_(managed))
+    elif library_id is not None:
+        stmt = stmt.where(Borrowing.library_id == library_id)
+
+    stmt = stmt.order_by(Borrowing.borrow_date.desc())
     return db.scalars(stmt).all()
 
 
-def get_user_borrowings(db: Session, user: User) -> Sequence[Borrowing]:
+def get_user_borrowings(
+    db: Session, user: User, library_id: uuid.UUID | None = None
+) -> Sequence[Borrowing]:
     """Kullanıcının ödünç aldığı kitapları (aktif ve geçmiş) tarihe göre sıralı döner."""
     sync_overdue_borrowings(db, user.id)
     sync_reservations(db)
-    stmt = (
-        select(Borrowing)
-        .where(Borrowing.user_id == user.id)
-        .order_by(Borrowing.borrow_date.desc())
-    )
+    stmt = select(Borrowing).where(Borrowing.user_id == user.id)
+    if library_id is not None:
+        stmt = stmt.where(Borrowing.library_id == library_id)
+    stmt = stmt.order_by(Borrowing.borrow_date.desc())
     return db.scalars(stmt).all()
 
 
-
-def get_user_reservations(db: Session, user: User) -> Sequence[Reservation]:
+def get_user_reservations(
+    db: Session, user: User, library_id: uuid.UUID | None = None
+) -> Sequence[Reservation]:
     """Kullanıcının aktif (PENDING) rezervasyonlarını tarihe göre sıralı döner (süresi bitenler ve ödünç alınanlar otomatik silinir)."""
     sync_reservations(db)
-    stmt = (
-        select(Reservation)
-        .where(
-            Reservation.user_id == user.id,
-            Reservation.status == ReservationStatus.PENDING,
-        )
-        .order_by(Reservation.reservation_date.asc())
+    stmt = select(Reservation).where(
+        Reservation.user_id == user.id,
+        Reservation.status == ReservationStatus.PENDING,
     )
+    if library_id is not None:
+        stmt = stmt.where(Reservation.library_id == library_id)
+    stmt = stmt.order_by(Reservation.reservation_date.asc())
     return db.scalars(stmt).all()
 
 
@@ -991,9 +1075,14 @@ def admin_approve_borrow(
     copy_code: str | None = None,
 ) -> Borrowing:
     """Görevli (ADMIN) bekleyen ödünç talebini (PENDING_BORROW) onaylar ve kitabı teslim eder."""
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
     borrowing = db.get(Borrowing, borrowing_id)
     if not borrowing:
         raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.library_id is not None and not is_user_system_admin(admin_user):
+        if not is_user_library_admin(db, admin_user, borrowing.library_id):
+            raise ForbiddenError("Başka bir kütüphaneye ait ödünç talebini onaylama yetkiniz bulunmamaktadır.")
     if borrowing.status == BorrowingStatus.RETURNED or borrowing.approval_status != "PENDING_BORROW":
         raise BusinessRuleError("Bu kayıt görevli ödünç onayı beklemiyor")
 
@@ -1017,6 +1106,7 @@ def admin_approve_borrow(
         db.add(
             StockMovement(
                 book_id=book.id,
+                library_id=book.library_id or borrowing.library_id,
                 user_id=borrowing.user_id,
                 admin_id=admin_user.id,
                 borrowing_id=borrowing.id,
@@ -1048,9 +1138,14 @@ def admin_reject_borrow(
     admin_notes: str | None = None,
 ) -> Borrowing:
     """Görevli (ADMIN) bekleyen ödünç talebini (PENDING_BORROW) reddeder ve ayrılan stoğu rafa geri ekler."""
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
     borrowing = db.get(Borrowing, borrowing_id)
     if not borrowing:
         raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.library_id is not None and not is_user_system_admin(admin_user):
+        if not is_user_library_admin(db, admin_user, borrowing.library_id):
+            raise ForbiddenError("Başka bir kütüphaneye ait ödünç talebini reddetme yetkiniz bulunmamaktadır.")
     if borrowing.status == BorrowingStatus.RETURNED or borrowing.approval_status != "PENDING_BORROW":
         raise BusinessRuleError("Bu kayıt görevli ödünç onayı beklemiyor")
 
@@ -1068,6 +1163,7 @@ def admin_reject_borrow(
         db.add(
             StockMovement(
                 book_id=book.id,
+                library_id=book.library_id or borrowing.library_id,
                 user_id=borrowing.user_id,
                 admin_id=admin_user.id,
                 borrowing_id=borrowing.id,
@@ -1117,9 +1213,14 @@ def admin_approve_return(
     data: AdminApproveReturnRequest,
 ) -> Borrowing:
     """Görevli (ADMIN) kitabın fiziksel durumunu (Sağlam / Hasarlı / Kayıp) kontrol ederek iadeyi onaylar."""
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
     borrowing = db.get(Borrowing, borrowing_id)
     if not borrowing:
         raise NotFoundError("Ödünç kaydı bulunamadı")
+    if borrowing.library_id is not None and not is_user_system_admin(admin_user):
+        if not is_user_library_admin(db, admin_user, borrowing.library_id):
+            raise ForbiddenError("Başka bir kütüphaneye ait iade talebini onaylama yetkiniz bulunmamaktadır.")
     if borrowing.status == BorrowingStatus.RETURNED:
         raise BusinessRuleError("Bu kitap zaten iade edilmiş")
     if borrowing.approval_status == "PENDING_BORROW":
@@ -1142,9 +1243,14 @@ def create_manual_stock_movement(
     data: StockMovementCreate,
 ) -> StockMovement:
     """Görevli tarafından doğrudan hasarlı/kayıp kitap stok düşümü veya yeni stok girişi kaydeder."""
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
     book = db.get(Book, data.book_id)
     if not book:
         raise NotFoundError("Kitap bulunamadı")
+    if book.library_id is not None and not is_user_system_admin(admin_user):
+        if not is_user_library_admin(db, admin_user, book.library_id):
+            raise ForbiddenError("Başka bir kütüphaneye ait kitap için stok hareketi ekleme yetkiniz bulunmamaktadır.")
 
     m_type = (data.movement_type or "ADMIN_RESTOCK").upper()
     if m_type not in ("ADMIN_DAMAGE", "ADMIN_LOST", "ADMIN_RESTOCK"):
@@ -1176,6 +1282,7 @@ def create_manual_stock_movement(
 
     movement = StockMovement(
         book_id=book.id,
+        library_id=book.library_id,
         admin_id=admin_user.id,
         movement_type=m_type,
         condition=cond,
@@ -1215,10 +1322,41 @@ def get_stock_movements_summary(
     condition: str | None = None,
     book_id: uuid.UUID | None = None,
     limit: int = 100,
+    library_id: uuid.UUID | None = None,
+    actor: User | None = None,
 ) -> StockMovementSummaryResponse:
     """Tüm stok hareketlerini ve hasar/kayıp raporlarını özet istatistiklerle döndürür."""
+    from app.modules.library.service import (
+        get_user_managed_library_ids,
+        is_user_system_admin,
+        require_library_admin_access,
+    )
+
+    stmt = select(StockMovement)
+    if actor is not None and not is_user_system_admin(actor):
+        if library_id is not None:
+            require_library_admin_access(db, actor, library_id)
+            stmt = stmt.where(StockMovement.library_id == library_id)
+        else:
+            managed = get_user_managed_library_ids(db, actor)
+            if not managed:
+                return StockMovementSummaryResponse(
+                    total_movements=0,
+                    damaged_reports_count=0,
+                    lost_reports_count=0,
+                    damaged_count=0,
+                    lost_count=0,
+                    restock_count=0,
+                    total_compensation_amount=0.0,
+                    total_damage_lost_penalty=0.0,
+                    items=[],
+                )
+            stmt = stmt.where(StockMovement.library_id.in_(managed))
+    elif library_id is not None:
+        stmt = stmt.where(StockMovement.library_id == library_id)
+
     all_movements = list(
-        db.scalars(select(StockMovement).order_by(StockMovement.created_at.desc())).all()
+        db.scalars(stmt.order_by(StockMovement.created_at.desc())).all()
     )
 
     damaged_count = sum(1 for m in all_movements if m.condition == "DAMAGED")
@@ -1474,6 +1612,7 @@ def get_user_and_admin_notifications(
         if b.status != BorrowingStatus.RETURNED and approval_st != "PENDING_BORROW":
             if b.status == BorrowingStatus.OVERDUE or (due_d is not None and today > due_d):
                 days_over = max(1, (today - due_d).days) if due_d else 1
+                daily_rate = getattr(b, "effective_daily_fine_rate", float(settings.DAILY_PENALTY_RATE))
                 items.append(
                     NotificationItem(
                         id=f"user-overdue-{b.id}",
@@ -1481,7 +1620,7 @@ def get_user_and_admin_notifications(
                         type="OVERDUE_BOOK",
                         severity="error",
                         title="İade Etme Tarihiniz Geçti!",
-                        message=f"'{b_title}' kitabının iade tarihi {days_over} gün gecikmiştir. Günlük 10 TL gecikme cezası uygulanmaktadır. Lütfen iade ediniz.",
+                        message=f"'{b_title}' kitabının iade tarihi {days_over} gün gecikmiştir. Günlük {daily_rate:.0f} TL gecikme cezası uygulanmaktadır. Lütfen iade ediniz.",
                         action_type="RETURN_BOOK",
                         meta={"borrowing_id": str(b.id), "book_title": b_title, "overdue_days": days_over},
                     )
@@ -1540,16 +1679,25 @@ def get_user_and_admin_notifications(
 
     user_action_count = len(items)
 
-    # 2. YÖNETİCİ BİLDİRİMLERİ (Yalnızca Admin Kullanıcı İçin)
+    # 2. YÖNETİCİ BİLDİRİMLERİ (Yalnızca Admin / Library Admin Kullanıcı İçin)
+    from app.modules.library.service import get_user_managed_library_ids, is_user_system_admin
+
+    managed_lib_ids = get_user_managed_library_ids(db, user)
+    is_sys_admin = is_user_system_admin(user)
+    is_admin = is_sys_admin or len(managed_lib_ids) > 0
+
     admin_pending_payments = 0
     admin_pending_returns = 0
     admin_pending_borrows = 0
     admin_items: list[NotificationItem] = []
 
     if is_admin:
+        b_stmt = select(Borrowing)
+        if not is_sys_admin:
+            b_stmt = b_stmt.where(Borrowing.library_id.in_(managed_lib_ids))
         all_borrowings = list(
             db.scalars(
-                select(Borrowing).order_by(Borrowing.borrow_date.desc(), Borrowing.id.desc())
+                b_stmt.order_by(Borrowing.borrow_date.desc(), Borrowing.id.desc())
             ).all()
         )
 

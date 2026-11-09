@@ -37,21 +37,28 @@ export default function BookDetailModal({
   const [loadingReviews, setLoadingReviews] = useState(true);
   const [hasBorrowedBook, setHasBorrowedBook] = useState(false);
 
-  // Default due_date = today + 14 days
-  const getDefaultDueDate = () => {
+  const libName = book?.library_name || 'Test Kütüphanesi';
+  const libMaxBorrowDays = Number(book?.library_max_borrow_days || 14);
+  const libDailyFine = Number(book?.library_daily_fine_amount ?? 5.0);
+  const libMaxBooks = Number(book?.library_max_books_per_user || 3);
+  const libPenaltyRulesText = book?.library_penalty_rules_text || '';
+
+  // Default due_date = today + libMaxBorrowDays
+  const getDefaultDueDate = (days = 14) => {
     const d = new Date();
-    d.setDate(d.getDate() + 14);
+    d.setDate(d.getDate() + Number(days || 14));
     return d.toISOString().split('T')[0];
   };
   const todayStr = new Date().toISOString().split('T')[0];
+  const maxDueDateStr = getDefaultDueDate(libMaxBorrowDays);
 
-  const [dueDate, setDueDate] = useState(getDefaultDueDate());
+  const [dueDate, setDueDate] = useState(getDefaultDueDate(initialBook?.library_max_borrow_days || 14));
   const [actionLoading, setActionLoading] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
 
   // Planlanan teslim tarihine göre dinamik gün farkı
   const selectedBorrowDays = (() => {
-    if (!dueDate) return 14;
+    if (!dueDate) return libMaxBorrowDays;
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -68,7 +75,7 @@ export default function BookDetailModal({
       const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
       return diffDays > 0 ? diffDays : 1;
     } catch {
-      return 14;
+      return libMaxBorrowDays;
     }
   })();
 
@@ -90,7 +97,17 @@ export default function BookDetailModal({
   const [deletingReviewId, setDeletingReviewId] = useState(null);
   const [reactingReviewId, setReactingReviewId] = useState(null);
 
-  const isAdmin = Boolean(user?.roles?.includes('ADMIN'));
+  const isAdmin = Boolean(
+    user?.is_system_admin ||
+      user?.roles?.includes('SYSTEM_ADMIN') ||
+      user?.roles?.includes('ADMIN') ||
+      user?.memberships?.some(
+        (m) =>
+          String(m.library_id) === String(book?.library_id) &&
+          m.role === 'LIBRARY_ADMIN' &&
+          m.status === 'APPROVED'
+      )
+  );
 
   const loadBookAndReviews = async () => {
     setLoadingReviews(true);
@@ -495,6 +512,11 @@ export default function BookDetailModal({
                       Yer Kodu: {book.call_number}
                     </span>
                   )}
+
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-indigo-800 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                    Kütüphane: {libName}
+                  </span>
                 </div>
 
                 {/* Authors */}
@@ -543,6 +565,22 @@ export default function BookDetailModal({
 
               {/* Borrowing & Reservation Action Box */}
               <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                {/* Kütüphane Özel Ödünç & Ceza Şartları Bilgilendirme Kutusu */}
+                <div className="p-3 rounded-xl bg-indigo-50/80 border border-indigo-200 text-xs text-indigo-950 space-y-1">
+                  <p className="font-extrabold flex items-center gap-1.5 text-indigo-900">
+                    <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>
+                      Bu kitabı <strong>{libName}</strong> üzerinden ödünç alıyorsunuz. Teslim süresi{' '}
+                      <strong>{libMaxBorrowDays} gün</strong>, gecikme durumunda günlük ceza{' '}
+                      <strong>{libDailyFine.toFixed(2)} TL</strong>&apos;dir. (Kişi başı aktif kitap limiti: {libMaxBooks} adet)
+                    </span>
+                  </p>
+                  {libPenaltyRulesText && (
+                    <p className="text-[11px] text-indigo-800 leading-relaxed">
+                      <strong>Kütüphane Ceza & Ödünç Şartları:</strong> {libPenaltyRulesText}
+                    </p>
+                  )}
+                </div>
                 {user?.is_banned ? (
                   <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-start gap-2">
                     <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -614,6 +652,7 @@ export default function BookDetailModal({
                           <input
                             type="date"
                             min={todayStr}
+                            max={maxDueDateStr}
                             value={dueDate}
                             onChange={(e) => setDueDate(e.target.value)}
                             className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -689,6 +728,7 @@ export default function BookDetailModal({
                           <input
                             type="date"
                             min={todayStr}
+                            max={maxDueDateStr}
                             value={dueDate}
                             onChange={(e) => setDueDate(e.target.value)}
                             className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -791,6 +831,12 @@ export default function BookDetailModal({
                         </div>
                       </div>
                       <p>
+                        • <strong>İlgili Kütüphane ve Kurallar:</strong>{' '}
+                        <span className="font-bold text-indigo-800">
+                          Bu kitabı {libName} üzerinden ödünç alıyorsunuz. Teslim süresi {selectedBorrowDays} gün (Maks. {libMaxBorrowDays} gün), gecikme durumunda günlük ceza {libDailyFine.toFixed(2)} TL&apos;dir.
+                        </span>
+                      </p>
+                      <p>
                         • <strong>Planlanan Son Teslim Tarihi:</strong>{' '}
                         <span className="font-bold text-indigo-700">{dueDate}</span>
                       </p>
@@ -799,7 +845,7 @@ export default function BookDetailModal({
                       </p>
                       <p>
                         • <strong>Gecikme & Sorumluluk Kuralları:</strong> Süresi aşan kitaplarda günlük{' '}
-                        <strong>10 TL</strong> gecikme bedeli uygulanır. Kitabın hasarlı veya kayıp iadesinde kütüphane tüzüğü gereğince hasar/kayıp tazminatı tahakkuk ettirilir.
+                        <strong>{libDailyFine.toFixed(2)} TL</strong> gecikme bedeli uygulanır. Kitabın hasarlı veya kayıp iadesinde kütüphane tüzüğü gereğince hasar/kayıp tazminatı tahakkuk ettirilir.
                       </p>
                     </div>
 
@@ -868,6 +914,12 @@ export default function BookDetailModal({
                     </div>
 
                     <div className="bg-white/90 rounded-xl p-3 border border-amber-200 text-xs text-slate-700 space-y-1.5">
+                      <p>
+                        • <strong>Kütüphane ve Ödünç Şartları:</strong>{' '}
+                        <span className="font-bold text-amber-900">
+                          Bu kitabı {libName} üzerinden rezerve ediyorsunuz. Teslim süresi {libMaxBorrowDays} gün, gecikme durumunda günlük ceza {libDailyFine.toFixed(2)} TL&apos;dir.
+                        </span>
+                      </p>
                       <p>
                         • <strong>Tahmini Sıranız:</strong>{' '}
                         <span className="font-bold text-amber-800">{reservedCount + 1}. Sıra</span>

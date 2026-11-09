@@ -32,6 +32,10 @@ class DuplicateError(Exception):
     pass
 
 
+class ForbiddenError(Exception):
+    pass
+
+
 # --- Publisher ---
 def get_publishers(db: Session) -> Sequence[Publisher]:
     return db.scalars(select(Publisher)).all()
@@ -159,11 +163,38 @@ def get_books(
     publisher: str | None = None,
     sort_by: str = "title",
     sort_order: str = "asc",
+    library_id: uuid.UUID | None = None,
+    current_user: Any | None = None,
 ) -> dict[str, Any]:
     from app.modules.borrowing.service import sync_reservations
+    from app.modules.library.models import LibraryMembership, MembershipStatus
+    from app.modules.library.service import is_user_system_admin
 
     sync_reservations(db)
     stmt = select(Book)
+
+    if library_id is not None:
+        if current_user is not None and not is_user_system_admin(current_user):
+            mem = db.scalar(
+                select(LibraryMembership).where(
+                    LibraryMembership.user_id == current_user.id,
+                    LibraryMembership.library_id == library_id,
+                )
+            )
+            if mem and mem.status == MembershipStatus.BANNED.value:
+                raise ForbiddenError(
+                    f"Bu kütüphanedeki üyeliğiniz banlandığı (kısıtlandığı) için kataloğa erişemezsiniz. "
+                    f"Sebep: {mem.ban_reason or 'Kütüphane kuralları ihlali'}"
+                )
+            if not mem or mem.status != MembershipStatus.APPROVED.value:
+                return {
+                    "items": [],
+                    "total": 0,
+                    "page": page,
+                    "limit": limit,
+                    "total_pages": 0,
+                }
+        stmt = stmt.where(Book.library_id == library_id)
 
     # 1. Arama (Search): Başlıkta (title) büyük/küçük harf duyarsız arama
     if search:
@@ -231,7 +262,25 @@ def get_book(db: Session, book_id: uuid.UUID) -> Book:
     return db_obj
 
 
-def create_book(db: Session, data: BookCreate) -> Book:
+def create_book(db: Session, data: BookCreate, actor: Any | None = None) -> Book:
+    from app.modules.library.service import (
+        get_user_managed_library_ids,
+        is_user_library_admin,
+        is_user_system_admin,
+    )
+
+    target_lib_id = data.library_id
+    if actor is not None and not is_user_system_admin(actor):
+        if target_lib_id is None:
+            managed = get_user_managed_library_ids(db, actor)
+            if not managed:
+                raise ForbiddenError("Yöneticisi olduğunuz onaylı bir kütüphane bulunamadı.")
+            target_lib_id = managed[0]
+        elif not is_user_library_admin(db, actor, target_lib_id):
+            raise ForbiddenError(
+                "Başka bir kütüphanenin kataloğuna kitap ekleme yetkiniz bulunmamaktadır (Tam Veri İzolasyonu)."
+            )
+
     db_obj = Book(
         title=data.title,
         isbn=data.isbn,
@@ -239,6 +288,7 @@ def create_book(db: Session, data: BookCreate) -> Book:
         stock_count=data.stock_count,
         publisher_id=data.publisher_id,
         cover_url=data.cover_url,
+        library_id=target_lib_id,
     )
 
     # Çoktan çoğa ilişki atamaları
@@ -258,10 +308,17 @@ def create_book(db: Session, data: BookCreate) -> Book:
     return db_obj
 
 
-def update_book(db: Session, book_id: uuid.UUID, data: BookUpdate) -> Book:
+def update_book(db: Session, book_id: uuid.UUID, data: BookUpdate, actor: Any | None = None) -> Book:
     from app.modules.borrowing.service import sync_reservations
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
 
     db_obj = get_book(db, book_id)
+
+    if actor is not None and not is_user_system_admin(actor):
+        if db_obj.library_id is None or not is_user_library_admin(db, actor, db_obj.library_id):
+            raise ForbiddenError(
+                "Başka bir kütüphaneye ait kitabı düzenleme yetkiniz bulunmamaktadır (Tam Veri İzolasyonu)."
+            )
 
     update_data = data.model_dump(exclude_unset=True, exclude={"author_ids", "category_ids"})
     for key, value in update_data.items():
@@ -284,8 +341,17 @@ def update_book(db: Session, book_id: uuid.UUID, data: BookUpdate) -> Book:
     return db_obj
 
 
-def delete_book(db: Session, book_id: uuid.UUID) -> None:
+def delete_book(db: Session, book_id: uuid.UUID, actor: Any | None = None) -> None:
+    from app.modules.library.service import is_user_library_admin, is_user_system_admin
+
     db_obj = get_book(db, book_id)
+
+    if actor is not None and not is_user_system_admin(actor):
+        if db_obj.library_id is None or not is_user_library_admin(db, actor, db_obj.library_id):
+            raise ForbiddenError(
+                "Başka bir kütüphaneye ait kitabı silme yetkiniz bulunmamaktadır (Tam Veri İzolasyonu)."
+            )
+
     db.delete(db_obj)
     try:
         db.commit()
